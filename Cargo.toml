@@ -26,3 +26,4 @@ tokio = ["dep:tokio"]
 
 [build-dependencies]
 tonic-build = "0.14.6"
+tonic-prost-build = "0.14.6"
