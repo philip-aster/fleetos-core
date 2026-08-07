@@ -1,7 +1,7 @@
 syntax = "proto3";
 package fleetos.v1.state;
 
-// Real-time Watch API streaming state changes to Worker Nodes and Routers
+// Real-time etcd style Watch API streaming state changes to Workers and Routers
 service StateService {
   rpc Watch (WatchRequest) returns (stream WatchResponse);
 }

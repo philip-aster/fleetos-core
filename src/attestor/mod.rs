@@ -1,5 +1,4 @@
-// src/attestor/mod.rs
-// Hardware Attestation Trait Abstraction
+// Node Attestation Trait Abstraction
 
 pub mod mock;
 #[cfg(feature = "tpm")]

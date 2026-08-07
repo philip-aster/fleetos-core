@@ -1,4 +1,3 @@
-// src/hash.rs
 // Truncated 128-bit BLAKE3 identity fingerprinting engine for eBPF maps
 
 use crate::spiffe::SpiffeId;

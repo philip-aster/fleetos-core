@@ -1,10 +1,10 @@
-// src/policy.rs
 // Service Authorization Graph (SAG) schemas & eBPF policy keys
 
 use crate::hash::IdentityHash;
 use crate::spiffe::SpiffeId;
 use serde::{Deserialize, Serialize};
 
+/// Basic allow/deny policy action
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[repr(u8)]
 pub enum PolicyAction {

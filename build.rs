@@ -9,9 +9,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             &["proto/v1/identity.proto", "proto/v1/state.proto"],
             &["proto/v1"], // Search path for imported proto files
         )?;
-
     println!("cargo:rerun-if-changed=proto/v1/identity.proto");
     println!("cargo:rerun-if-changed=proto/v1/state.proto");
-
     Ok(())
 }

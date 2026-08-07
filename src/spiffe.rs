@@ -1,4 +1,3 @@
-// src/spiffe.rs
 // SPIFFE ID parser, generator, and validator for FleetOS
 
 use serde::{Deserialize, Serialize};
@@ -12,7 +11,7 @@ pub enum IdentityError {
     InvalidUri(String),
     #[error("Missing expected segment in SPIFFE ID: {0}")]
     MissingSegment(&'static str),
-    #[error("Attestation failure: {0}")]
+    #[error("Attestation failed: {0}")]
     AttestationFailed(String),
 }
 

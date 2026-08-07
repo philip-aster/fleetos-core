@@ -1,4 +1,3 @@
-// src/proto.rs
 // Re-exports tonic gRPC modules generated from proto/v1/*.proto
 
 pub mod identity {

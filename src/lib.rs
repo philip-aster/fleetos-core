@@ -1,5 +1,4 @@
-// src/lib.rs
-// Root module declaration file for fleetos-core
+// Root module declaration file for the fleetos-core
 
 pub mod attestor;
 pub mod hash;
