@@ -6,7 +6,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .build_server(true) // Generate gRPC server traits
         .build_client(true) // Generate gRPC client structs
         .compile_protos(
-            &["proto/v1/identity.proto", "proto/v1/state.proto"],
+            &[
+                "proto/v1/identity.proto",
+                "proto/v1/state.proto",
+                "proto/v1/secret.proto",
+            ],
             &["proto/v1"], // Search path for imported proto files
         )?;
     println!("cargo:rerun-if-changed=proto/v1/identity.proto");

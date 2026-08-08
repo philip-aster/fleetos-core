@@ -1,14 +1,17 @@
 syntax = "proto3";
+
 package fleetos.v1.state;
 
-// Real-time etcd style Watch API streaming state changes to Workers and Routers
+// Real-time etcd-style Watch & KV API streaming state changes to Workers, Routers, and Agents
 service StateService {
+  // Streams real-time state changes matching key_prefix to agents
   rpc Watch (WatchRequest) returns (stream WatchResponse);
-}
 
-message WatchRequest {
-  uint64 start_revision = 1;
-  bytes key_prefix = 2;
+  // Unary fetch for point-in-time state checks
+  rpc Get (GetRequest) returns (GetResponse);
+
+  // Unary write for state mutations
+  rpc Put (PutRequest) returns (PutResponse);
 }
 
 enum EventType {
@@ -17,9 +20,34 @@ enum EventType {
   EVENT_TYPE_DELETE = 2;
 }
 
+message WatchRequest {
+  uint64 start_revision = 1;
+  bytes key_prefix = 2;
+  string node_id = 3;      // Target node identifier
+  string spiffe_id = 4;    // Attested SPIFFE ID of requesting agent/pod
+}
+
 message WatchResponse {
   uint64 revision = 1;
   EventType event_type = 2;
   bytes key = 3;
   bytes value = 4;
+}
+
+message GetRequest {
+  bytes key = 1;
+}
+
+message GetResponse {
+  bytes value = 1;
+  uint64 revision = 2;
+}
+
+message PutRequest {
+  bytes key = 1;
+  bytes value = 2;
+}
+
+message PutResponse {
+  uint64 revision = 1;
 }

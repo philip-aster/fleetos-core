@@ -1,6 +1,7 @@
 // Root module declaration file for the fleetos-core
 
 pub mod attestor;
+pub mod crypto;
 pub mod hash;
 pub mod policy;
 pub mod proto;
