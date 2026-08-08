@@ -31,6 +31,19 @@ pub enum EntityType {
 }
 
 impl SpiffeId {
+    pub fn new_node(
+        trust_domain: impl Into<String>,
+        namespace: impl Into<String>,
+        node_id: impl Into<String>,
+    ) -> Self {
+        Self {
+            trust_domain: trust_domain.into(),
+            namespace: namespace.into(),
+            entity_type: EntityType::Node {
+                node_id: node_id.into(),
+            },
+        }
+    }
     pub fn new_workload(
         trust_domain: impl Into<String>,
         namespace: impl Into<String>,
