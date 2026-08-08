@@ -1,7 +1,6 @@
 // Node Attestation Trait Abstraction
 
 pub mod mock;
-#[cfg(feature = "tpm")]
 pub mod tpm2;
 
 use crate::spiffe::IdentityError;
