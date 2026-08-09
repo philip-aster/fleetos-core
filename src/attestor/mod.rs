@@ -22,6 +22,14 @@ pub struct PcrEntry {
 
 #[async_trait]
 pub trait HardwareAttestor: Send + Sync {
+    /// Generates a hardware quote payload for the given nonce
     async fn generate_quote(&self, nonce: &[u8]) -> Result<AttestationPayload, IdentityError>;
+    /// Verifies an incoming AttestationPayload against the expected nonce
+    async fn verify_quote(
+        &self,
+        payload: &AttestationPayload,
+        expected_nonce: &[u8],
+    ) -> Result<bool, IdentityError>;
+    /// Returns the public identity key of the attestor
     fn public_identity(&self) -> Result<Vec<u8>, IdentityError>;
 }

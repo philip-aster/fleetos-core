@@ -41,6 +41,20 @@ impl HardwareAttestor for MockHardwareAttestor {
         })
     }
 
+    // Add inside the `#[async_trait] impl HardwareAttestor for MockHardwareAttestor` block:
+
+    async fn verify_quote(
+        &self,
+        payload: &AttestationPayload,
+        expected_nonce: &[u8],
+    ) -> Result<bool, IdentityError> {
+        // Validate that the signature quote contains the mock prefix and ends with the nonce
+        let starts_valid = payload.signature_quote.starts_with(&[0xDD; 64]);
+        let ends_valid = payload.signature_quote.ends_with(expected_nonce);
+
+        Ok(starts_valid && ends_valid)
+    }
+
     fn public_identity(&self) -> Result<Vec<u8>, IdentityError> {
         // Return dummy SEC1 uncompressed public key bytes for mock testing
         Ok(vec![0x04; 65])

@@ -42,6 +42,21 @@ impl HardwareAttestor for Tpm2Attestor {
         })
     }
 
+    async fn verify_quote(
+        &self,
+        payload: &AttestationPayload,
+        expected_nonce: &[u8],
+    ) -> Result<bool, IdentityError> {
+        if !self.device_path.exists() {
+            return Err(IdentityError::AttestationFailed(format!(
+                "TPM character device not found at {:?}",
+                self.device_path
+            )));
+        }
+
+        // Check if signature matches expected nonce
+        Ok(payload.signature_quote == expected_nonce)
+    }
     fn public_identity(&self) -> Result<Vec<u8>, IdentityError> {
         if !self.device_path.exists() {
             return Err(IdentityError::AttestationFailed(format!(
