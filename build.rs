@@ -15,5 +15,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         )?;
     println!("cargo:rerun-if-changed=proto/v1/identity.proto");
     println!("cargo:rerun-if-changed=proto/v1/state.proto");
+    println!("cargo:rerun-if-changed=proto/v1/secret.proto");
     Ok(())
 }
