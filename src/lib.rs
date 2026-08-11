@@ -1,4 +1,4 @@
-// Root module declaration file for the fleetos-core
+// Root module declaration file for fleetos-core
 
 pub mod attestor;
 pub mod crypto;
@@ -16,6 +16,20 @@ pub use spiffe::{EntityType, SpiffeId};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+/// Quality of Service class assigned to a Pod for resource scheduling & eviction
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+pub enum QosClass {
+    BestEffort = 0,
+    Burstable = 1,
+    Guaranteed = 2,
+}
+
+impl Default for QosClass {
+    fn default() -> Self {
+        Self::Burstable
+    }
+}
+
 /// High-level Pod specification representing a workload unit on FleetOS
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct PodSpec {
@@ -24,6 +38,7 @@ pub struct PodSpec {
     pub namespace: String,
     pub role: PodRole,
     pub runtime: RuntimeEngine,
+    pub qos: QosClass,
     pub labels: HashMap<String, String>,
     pub annotations: HashMap<String, String>,
     pub containers: Vec<ContainerSpec>,
