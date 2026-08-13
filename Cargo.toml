@@ -6,30 +6,38 @@ authors = ["Philip Aster and the FleetOS Contributors"]
 description = "Core identity primitives, cryptographic hashing, and protobuf schemas for FleetOS."
 
 [dependencies]
+# Cryptography & Hashing
 aes-gcm = "0.11.0"
+blake3 = "1.8.6"
+sha2 = "0.11.0"
+rand = "0.10.2"
+der = { version = "0.8.1", features = ["derive", "alloc"] }
+rcgen = { version = "0.14.8", features = ["x509-parser"] }
+x509-cert = { version = "0.3.0", features = ["builder", "pem"] }
+
+# Utility & Async
 anyhow = "1.0.104"
 async-trait = "0.1.91"
-blake3 = "1.8.6"
-der = { version = "0.8.1", features = ["derive", "alloc"] }
 hex = "0.4.3"
-prost = "0.14.4"
-rand = "0.10.2"
-rcgen = { version = "0.14.8", features = ["x509-parser"] }
 serde = { version = "1.0.229", features = ["derive"] }
-sha2 = "0.11.0"
 thiserror = "2.0.19"
 tokio = { version = "1.53.1", features = ["full"], optional = true }
+
+# eBPF / TPM Hardware Hardware Security (Optional Features)
+bytemuck = { version = "1.25.2", features = ["derive"], optional = true }
+tss-esapi = { version = "7.7.0", optional = true }
+
+# gRPC & Protobuf Infrastructure
+prost = "0.14.4"
 tonic = "0.14.6"
 tonic-prost = "0.14.6"
-tss-esapi = { version = "7.7.0", optional = true }
-x509-cert = { version = "0.3.0", features = ["builder", "pem"] }
 
 [features]
 default = ["std"]
 std = []
 tpm = ["dep:tss-esapi"]
 tokio = ["dep:tokio"]
+bytemuck = ["dep:bytemuck"]
 
 [build-dependencies]
-tonic-build = "0.14.6"
 tonic-prost-build = "0.14.6"

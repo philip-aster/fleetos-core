@@ -9,9 +9,10 @@ pub mod spiffe;
 
 // Convenient top-level re-exports
 pub use attestor::{AttestationPayload, HardwareAttestor};
+pub use crypto::AeadEnvelope;
 pub use hash::IdentityHash;
-pub use policy::{PolicyAction, SagRule};
-pub use spiffe::{EntityType, SpiffeId};
+pub use policy::{EbpfPolicyKey, EbpfPolicyValue, PolicyAction, SagRule};
+pub use spiffe::{EntityType, IdentityError, SpiffeId};
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -46,13 +47,29 @@ pub struct PodSpec {
     pub restart_policy: RestartPolicy,
 }
 
+impl PodSpec {
+    /// Derives the strongly-typed `SpiffeId` for this Pod workload instance
+    pub fn derive_spiffe_id(&self, trust_domain: &str) -> SpiffeId {
+        if let Some(ref override_id) = self.role.spiffe_id {
+            return override_id.clone();
+        }
+
+        SpiffeId::new_workload(
+            trust_domain,
+            &self.namespace,
+            &self.name,
+            &self.role.role_name,
+        )
+    }
+}
+
 /// Execution role and security boundaries assigned to a Pod
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct PodRole {
     /// Role identifier (e.g. "worker-node", "ingress-router", "database-agent")
     pub role_name: String,
     /// Attested SPIFFE ID constraint for identity verification
-    pub spiffe_id: Option<String>,
+    pub spiffe_id: Option<SpiffeId>,
     /// Allowed capability set
     pub capabilities: Vec<String>,
     /// System User / Group under which the workload executes

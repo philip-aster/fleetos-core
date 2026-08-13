@@ -27,7 +27,7 @@ pub struct SpiffeId {
 pub enum EntityType {
     Node { node_id: String },
     Router { router_id: String },
-    Workload { service: String, role: String },
+    Workload { workload_name: String, role: String },
 }
 
 impl SpiffeId {
@@ -44,17 +44,32 @@ impl SpiffeId {
             },
         }
     }
+
+    pub fn new_router(
+        trust_domain: impl Into<String>,
+        namespace: impl Into<String>,
+        router_id: impl Into<String>,
+    ) -> Self {
+        Self {
+            trust_domain: trust_domain.into(),
+            namespace: namespace.into(),
+            entity_type: EntityType::Router {
+                router_id: router_id.into(),
+            },
+        }
+    }
+
     pub fn new_workload(
         trust_domain: impl Into<String>,
         namespace: impl Into<String>,
-        service: impl Into<String>,
+        workload_name: impl Into<String>,
         role: impl Into<String>,
     ) -> Self {
         Self {
             trust_domain: trust_domain.into(),
             namespace: namespace.into(),
             entity_type: EntityType::Workload {
-                service: service.into(),
+                workload_name: workload_name.into(),
                 role: role.into(),
             },
         }
@@ -74,13 +89,44 @@ impl SpiffeId {
                     self.trust_domain, self.namespace, router_id
                 )
             }
-            EntityType::Workload { service, role } => {
+            EntityType::Workload {
+                workload_name,
+                role,
+            } => {
                 format!(
-                    "spiffe://{}/ns/{}/service/{}/role/{}",
-                    self.trust_domain, self.namespace, service, role
+                    "spiffe://{}/ns/{}/workload/{}/role/{}",
+                    self.trust_domain, self.namespace, workload_name, role
                 )
             }
         }
+    }
+
+    /// Computes a deterministic 32-bit FNV-1a hash of the SPIFFE URI for fast kernel eBPF map lookups
+    pub fn to_ebpf_identity_hash(&self) -> u32 {
+        let uri = self.to_uri();
+        let mut hasher = 0x811c9dc5u32;
+        for byte in uri.bytes() {
+            hasher ^= u32::from(byte);
+            hasher = hasher.wrapping_mul(0x01000193);
+        }
+        hasher
+    }
+
+    /// Returns the tenant namespace boundary
+    pub fn tenant_id(&self) -> &str {
+        &self.namespace
+    }
+
+    pub fn is_workload(&self) -> bool {
+        matches!(self.entity_type, EntityType::Workload { .. })
+    }
+
+    pub fn is_node(&self) -> bool {
+        matches!(self.entity_type, EntityType::Node { .. })
+    }
+
+    pub fn is_router(&self) -> bool {
+        matches!(self.entity_type, EntityType::Router { .. })
     }
 }
 
@@ -117,10 +163,10 @@ impl FromStr for SpiffeId {
                     .to_string();
                 EntityType::Router { router_id }
             }
-            "service" => {
-                let service = parts
+            "workload" => {
+                let workload_name = parts
                     .get(4)
-                    .ok_or(IdentityError::MissingSegment("service"))?
+                    .ok_or(IdentityError::MissingSegment("workload_name"))?
                     .to_string();
                 if parts.get(5) != Some(&"role") {
                     return Err(IdentityError::MissingSegment("role prefix"));
@@ -129,7 +175,10 @@ impl FromStr for SpiffeId {
                     .get(6)
                     .ok_or(IdentityError::MissingSegment("role"))?
                     .to_string();
-                EntityType::Workload { service, role }
+                EntityType::Workload {
+                    workload_name,
+                    role,
+                }
             }
             _ => return Err(IdentityError::InvalidUri(s.to_string())),
         };

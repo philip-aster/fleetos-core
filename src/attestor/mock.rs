@@ -1,8 +1,5 @@
-// fleetos-core/src/attestor/mock.rs
-
 use crate::attestor::{AttestationPayload, HardwareAttestor, PcrEntry};
 use crate::spiffe::IdentityError;
-use async_trait::async_trait;
 
 #[derive(Debug, Default, Clone)]
 pub struct MockHardwareAttestor;
@@ -13,22 +10,12 @@ impl MockHardwareAttestor {
     }
 }
 
-#[async_trait]
 impl HardwareAttestor for MockHardwareAttestor {
     async fn generate_quote(&self, nonce: &[u8]) -> Result<AttestationPayload, IdentityError> {
         let mock_pcrs = vec![
-            PcrEntry {
-                pcr_index: 0,
-                digest: vec![0xAA; 32],
-            },
-            PcrEntry {
-                pcr_index: 1,
-                digest: vec![0xBB; 32],
-            },
-            PcrEntry {
-                pcr_index: 7,
-                digest: vec![0xCC; 32],
-            },
+            PcrEntry::new_sha256(0, vec![0xAA; 32]),
+            PcrEntry::new_sha256(1, vec![0xBB; 32]),
+            PcrEntry::new_sha256(7, vec![0xCC; 32]),
         ];
 
         let mut signature = vec![0xDD; 64];
@@ -41,22 +28,25 @@ impl HardwareAttestor for MockHardwareAttestor {
         })
     }
 
-    // Add inside the `#[async_trait] impl HardwareAttestor for MockHardwareAttestor` block:
-
     async fn verify_quote(
         &self,
         payload: &AttestationPayload,
         expected_nonce: &[u8],
     ) -> Result<bool, IdentityError> {
-        // Validate that the signature quote contains the mock prefix and ends with the nonce
-        let starts_valid = payload.signature_quote.starts_with(&[0xDD; 64]);
-        let ends_valid = payload.signature_quote.ends_with(expected_nonce);
+        if payload.signature_quote.len() < 64 + expected_nonce.len() {
+            return Ok(false);
+        }
 
-        Ok(starts_valid && ends_valid)
+        let prefix_valid = payload.signature_quote[..64] == [0xDD; 64];
+        let nonce_valid = payload.signature_quote[64..].ends_with(expected_nonce);
+
+        Ok(prefix_valid && nonce_valid)
     }
 
     fn public_identity(&self) -> Result<Vec<u8>, IdentityError> {
-        // Return dummy SEC1 uncompressed public key bytes for mock testing
-        Ok(vec![0x04; 65])
+        let mut key = vec![0x04];
+        key.extend_from_slice(&[0x01; 32]);
+        key.extend_from_slice(&[0x02; 32]);
+        Ok(key)
     }
 }

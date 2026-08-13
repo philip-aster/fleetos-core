@@ -3,40 +3,58 @@ package fleetos.v1.identity;
 
 // Service running on Control Plane to attest nodes and issue short-lived SVIDs
 service IdentityService {
-  // Initiates hardware attestation and returns signed SVID X.509 cert
+  // Initiates attestation challenge to ensure freshness
+  rpc RequestAttestationChallenge (AttestationChallengeRequest) returns (AttestationChallengeResponse);
+
+  // Initiates hardware attestation via CSR and returns signed SVID X.509 cert
   rpc AttestNode (AttestNodeRequest) returns (AttestNodeResponse);
 
   // Workload requests fresh SVID certificate from Host Agent
   rpc MintWorkloadSvid (MintWorkloadRequest) returns (MintWorkloadResponse);
 }
 
+message AttestationChallengeRequest {
+  string node_id = 1;
+}
+
+message AttestationChallengeResponse {
+  bytes nonce = 1;
+  uint64 expires_at_unix = 2;
+}
+
 message AttestNodeRequest {
   string join_token = 1;
-  bytes public_identity_key = 2;
-  bytes signature_quote = 3;
-  repeated PcrValue pcr_values = 4;
+  bytes csr_der = 2;                     // Agent generates keypair locally; sends CSR
+  bytes ak_pubkey = 3;                   // TPM Attestation Key public key
+  bytes signature_quote = 4;             // TPM quote over PCRs + challenge nonce
+  bytes nonce = 5;                       // Nonce provided by Control Plane
+  repeated PcrValue pcr_values = 6;
 }
 
 message PcrValue {
   uint32 index = 1;
   bytes digest = 2;
+  string algorithm = 3;                  // e.g., "sha256"
 }
 
 message AttestNodeResponse {
   string spiffe_id = 1;
   bytes svid_certificate_pem = 2;
-  bytes private_key_pem = 3;
+  bytes ca_chain_pem = 3;                // Trust bundle for verification
   uint64 expires_at_unix = 4;
 }
 
 message MintWorkloadRequest {
-  string service_name = 1;
-  string role_name = 2;
-  bytes vsock_token = 3;
+  string tenant_id = 1;                  // Multi-tenancy isolation boundary
+  string service_name = 2;
+  string role_name = 3;                  // e.g., "primary", "replica"
+  bytes csr_der = 4;                     // Workload local CSR
+  bytes vsock_token = 5;                 // Attestation token passed via virtio-vsock
 }
 
 message MintWorkloadResponse {
-  string spiffe_id = 1;
+  string spiffe_id = 1;                  // spiffe://<domain>/ns/<tenant>/sa/<service>
   bytes svid_certificate_pem = 2;
-  uint64 expires_at_unix = 3;
+  bytes ca_chain_pem = 3;                // Trust bundle
+  uint64 expires_at_unix = 4;
 }
