@@ -5,7 +5,7 @@ use core::cmp::Ordering;
 use core::fmt;
 use core::str::FromStr;
 
-use alloc::string::String;
+use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
 use thiserror::Error;

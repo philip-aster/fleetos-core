@@ -2,6 +2,7 @@
 //! 128-bit BLAKE3 fingerprints for eBPF and router hot-paths.
 
 use crate::spiffe::{SpiffeId, WorkloadRole};
+use alloc::string::ToString;
 use bytemuck::{Pod, Zeroable};
 use core::cmp::Ordering;
 

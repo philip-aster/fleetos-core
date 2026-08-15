@@ -6,7 +6,7 @@ use crate::spiffe::WorkloadRole;
 use crate::tenant::TenantId;
 use crate::version::MonotonicVersion;
 
-use alloc::string::String;
+use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
