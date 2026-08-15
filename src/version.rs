@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-use std::cmp::Ordering;
+use core::cmp::Ordering;
 
-// Added `Default` to the derive list
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct MonotonicVersion(u64);
 

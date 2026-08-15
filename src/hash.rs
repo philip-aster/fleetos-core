@@ -2,12 +2,17 @@
 //! 128-bit BLAKE3 fingerprints for eBPF and router hot-paths.
 
 use crate::spiffe::{SpiffeId, WorkloadRole};
-use std::cmp::Ordering;
+use bytemuck::{Pod, Zeroable};
+use core::cmp::Ordering;
 
 /// Frozen 16-byte layout for eBPF maps.
 #[repr(C)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Pod, Zeroable)]
 pub struct IdentityFingerprint(pub [u8; 16]);
+
+// Static assertions to prevent padding/mismatch across kernel boundaries
+const _: () = assert!(core::mem::size_of::<IdentityFingerprint>() == 16);
+const _: () = assert!(core::mem::align_of::<IdentityFingerprint>() == 1);
 
 impl IdentityFingerprint {
     /// Domain separated hash: `hash(id_string || 0x00 || role_string_or_empty)`

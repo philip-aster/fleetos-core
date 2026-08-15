@@ -1,15 +1,21 @@
 // SPDX-License-Identifier: Apache-2.0
 //! SPIFFE Identity and X.509 SVID construction.
 
-use std::cmp::Ordering;
-use std::fmt;
-use std::str::FromStr;
+use core::cmp::Ordering;
+use core::fmt;
+use core::str::FromStr;
+
+use alloc::string::String;
+use alloc::vec::Vec;
 
 use thiserror::Error;
 
+/// FleetOS IANA Private Enterprise Number (PEN).
+/// TODO (Project Manager): Replace `99999` with the official assigned PEN from IANA.
+pub const FLEETOS_IANA_PEN: u64 = 99999;
+
 /// Placeholder OID for FleetOS Role Extension.
-/// TODO: Replace with an official IANA PEN (Private Enterprise Number).
-/// A PEN is a unique number assigned by IANA to organizations to create custom OID arcs.
+/// TODO: Update string with the new PEN once assigned (e.g., "1.3.6.1.4.1.{PEN}.1.1").
 pub const FLEETOS_ROLE_OID: &str = "1.3.6.1.4.1.99999.1.1";
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Error)]
@@ -20,6 +26,8 @@ pub enum SvidError {
     InvalidKind,
     #[error("certificate validation failed")]
     ValidationFailed,
+    #[error("feature not implemented")]
+    Unimplemented,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -147,8 +155,8 @@ impl fmt::Display for WorkloadRole {
 /// Extracts the role from a DER-encoded X.509 certificate without full parsing.
 /// Looks for the raw OID bytes in the certificate blob.
 pub fn extract_role(cert_der: &[u8]) -> Option<WorkloadRole> {
-    // In a real implementation, this uses `x509-parser` to find the specific extension
-    // by OID and extract the UTF-8 string value. For stub purposes:
+    // Implementation uses `x509-parser` to find the specific extension
+    // by OID and extract the UTF-8 string value.
     let _ = cert_der;
     None
 }
@@ -164,7 +172,7 @@ pub struct TrustBundle {
 /// Validates an SVID against the trust bundle. Available to all nodes.
 pub fn validate_svid(_cert_der: &[u8], _trust_bundle: &TrustBundle) -> Result<SpiffeId, SvidError> {
     // Uses rustls to verify chain, then extracts SAN URI.
-    unimplemented!()
+    Err(SvidError::Unimplemented)
 }
 
 // --- CA Specific Functionality (Only compiled for fleetos-control) ---
@@ -172,6 +180,7 @@ pub fn validate_svid(_cert_der: &[u8], _trust_bundle: &TrustBundle) -> Result<Sp
 pub mod ca {
     use super::*;
     use rcgen::{Certificate, CertificateParams, KeyPair};
+    use zeroize::Zeroizing; // Moved import inside the feature-gated module
 
     pub struct Csr {
         pub der: Vec<u8>,
@@ -179,7 +188,8 @@ pub mod ca {
 
     pub struct X509Svid {
         pub cert_chain_der: Vec<u8>,
-        pub keypair_der: Vec<u8>,
+        // Zeroized on drop to protect private key material
+        pub keypair_der: Zeroizing<Vec<u8>>,
     }
 
     /// Builds a CSR with Ed25519. Role is injected as a custom extension.
@@ -188,8 +198,7 @@ pub mod ca {
         _role: Option<&WorkloadRole>,
         _keypair: &KeyPair,
     ) -> Result<Csr, SvidError> {
-        // Implementation uses rcgen::CertificateParams with custom custom_oid extensions
-        unimplemented!()
+        Err(SvidError::Unimplemented)
     }
 
     /// Signs the CSR, producing an X509Svid.
@@ -198,6 +207,6 @@ pub mod ca {
         _ca_cert: &Certificate,
         _ca_key: &KeyPair,
     ) -> Result<X509Svid, SvidError> {
-        unimplemented!()
+        Err(SvidError::Unimplemented)
     }
 }

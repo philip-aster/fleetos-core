@@ -6,6 +6,9 @@ use crate::spiffe::WorkloadRole;
 use crate::tenant::TenantId;
 use crate::version::MonotonicVersion;
 
+use alloc::string::String;
+use alloc::vec::Vec;
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ServicePattern {
     tenant: TenantId,
@@ -24,7 +27,7 @@ pub struct SagRuleId([u8; 16]);
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SagAction {
     Allow,
-    Deny, // Explicit deny always overrides Allow
+    Deny,
 }
 
 #[derive(Debug, Clone)]
@@ -35,8 +38,6 @@ pub struct SagRule {
     pub action: SagAction,
 }
 
-/// Scoped builder to enforce type safety.
-/// You can only build PeerSelectors for the tenant this ctx represents.
 pub struct TenantCtx<'a> {
     tenant: &'a TenantId,
 }
@@ -58,8 +59,6 @@ impl<'a> TenantCtx<'a> {
 }
 
 impl TenantId {
-    /// Creates a rule. The closure receives a TenantCtx, making it a compile error
-    /// to attempt to reference another tenant's services.
     pub fn create_rule<F>(&self, action: SagAction, f: F) -> SagRule
     where
         F: FnOnce(&TenantCtx) -> (PeerSelector, PeerSelector),
@@ -67,11 +66,23 @@ impl TenantId {
         let ctx = TenantCtx { tenant: self };
         let (from, to) = f(&ctx);
 
-        // Generate ID (in reality, blake3 of tenant + rule_name + version)
-        let id = SagRuleId([0u8; 16]);
+        let mut hasher = blake3::Hasher::new();
+        hasher.update(self.to_string().as_bytes());
+        hasher.update(from.service.name.as_bytes());
+        if let Some(r) = &from.role {
+            hasher.update(r.0.as_bytes());
+        }
+        hasher.update(to.service.name.as_bytes());
+        if let Some(r) = &to.role {
+            hasher.update(r.0.as_bytes());
+        }
+
+        let mut id_bytes = [0u8; 16];
+        let hash = hasher.finalize();
+        id_bytes.copy_from_slice(&hash.as_bytes()[..16]);
 
         SagRule {
-            id,
+            id: SagRuleId(id_bytes),
             from,
             to,
             action,

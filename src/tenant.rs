@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // src/tenant.rs
-use std::fmt;
+use alloc::string::String;
+use core::fmt;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct TenantId(String);

@@ -1,9 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 //! Tonic-generated proto code and wire framing.
 
-// Includes generated code from build.rs
-// tonic::include_proto!("fleetos");
-
 /// Out-of-band identity header prefixing gRPC frames.
 /// 4-byte length + identity header + gRPC frame.
 pub mod identity_header {
@@ -34,23 +31,36 @@ pub mod identity_header {
         if buf.remaining() < 4 {
             return None;
         }
-        let len = buf.get_u32() as usize;
-        if buf.remaining() < len {
+
+        // Safely read length without advancing cursor and without assuming contiguous bytes > 4
+        let len_bytes = &buf[..4];
+        let len =
+            u32::from_be_bytes([len_bytes[0], len_bytes[1], len_bytes[2], len_bytes[3]]) as usize;
+
+        if buf.remaining() < 4 + len {
             return None;
         }
 
+        // Safe to advance cursor now
+        buf.advance(4);
+
         let _version = buf.get_u8();
         let svid_len = buf.get_u16() as usize;
-        let svid = std::str::from_utf8(&buf[..svid_len]).ok()?.to_string();
+
+        // We know we have `len` bytes available, so we can safely slice
+        let svid_bytes = &buf[..svid_len];
+        let svid = std::str::from_utf8(svid_bytes).ok()?.to_string();
         buf.advance(svid_len);
 
         let role_len = buf.get_u8() as usize;
         let role = if role_len > 0 {
-            Some(std::str::from_utf8(&buf[..role_len]).ok()?.to_string())
+            let role_bytes = &buf[..role_len];
+            let r = std::str::from_utf8(role_bytes).ok()?.to_string();
+            buf.advance(role_len);
+            Some(r)
         } else {
             None
         };
-        buf.advance(role_len);
 
         Some((svid, role))
     }
