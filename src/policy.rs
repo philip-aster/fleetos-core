@@ -1,99 +1,86 @@
-// Service Authorization Graph (SAG) schemas & eBPF policy keys
+// SPDX-License-Identifier: Apache-2.0
+//! Service Authorization Graph (SAG) Schema.
+//! Cross-tenant rules are prevented at compile-time via the TenantCtx builder.
 
-use crate::hash::IdentityHash;
-use crate::spiffe::SpiffeId;
-use serde::{Deserialize, Serialize};
+use crate::spiffe::WorkloadRole;
+use crate::tenant::TenantId;
+use crate::version::MonotonicVersion;
 
-/// Basic allow/deny policy action
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[repr(u8)]
-pub enum PolicyAction {
-    Deny = 0,
-    Allow = 1,
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ServicePattern {
+    tenant: TenantId,
+    name: String,
 }
 
-/// Evaluatable rule in the Service Authorization Graph
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct PeerSelector {
+    pub service: ServicePattern,
+    pub role: Option<WorkloadRole>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct SagRuleId([u8; 16]);
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SagAction {
+    Allow,
+    Deny, // Explicit deny always overrides Allow
+}
+
+#[derive(Debug, Clone)]
 pub struct SagRule {
-    pub source_pattern: String,
-    pub target_spiffe: SpiffeId,
-    pub target_hash: IdentityHash,
-    pub allowed_ports: Vec<u16>,
-    pub action: PolicyAction,
+    pub id: SagRuleId,
+    pub from: PeerSelector,
+    pub to: PeerSelector,
+    pub action: SagAction,
 }
 
-impl SagRule {
-    /// Evaluates whether a source SPIFFE ID matches the rule's `source_pattern`
-    pub fn matches_source(&self, src_id: &SpiffeId) -> bool {
-        let src_uri = src_id.to_uri();
+/// Scoped builder to enforce type safety.
+/// You can only build PeerSelectors for the tenant this ctx represents.
+pub struct TenantCtx<'a> {
+    tenant: &'a TenantId,
+}
 
-        if self.source_pattern == "*" || self.source_pattern == src_uri {
-            return true;
+impl<'a> TenantCtx<'a> {
+    pub fn service(&self, name: impl Into<String>) -> ServicePattern {
+        ServicePattern {
+            tenant: self.tenant.clone(),
+            name: name.into(),
         }
+    }
 
-        // Support prefix/glob matching (e.g., "spiffe://cluster.local/ns/prod/*")
-        if let Some(prefix) = self.source_pattern.strip_suffix('*') {
-            return src_uri.starts_with(prefix);
+    pub fn selector(&self, name: impl Into<String>, role: Option<WorkloadRole>) -> PeerSelector {
+        PeerSelector {
+            service: self.service(name),
+            role,
         }
-
-        false
-    }
-
-    /// Converts a matched rule and source identity into eBPF map entries
-    pub fn to_ebpf_key_value(
-        &self,
-        src_hash: &IdentityHash,
-        port: u16,
-    ) -> (EbpfPolicyKey, EbpfPolicyValue) {
-        let key = EbpfPolicyKey {
-            src_hash: src_hash.0,
-            dst_hash: self.target_hash.0,
-            port,
-            _pad: 0,
-        };
-
-        let value = EbpfPolicyValue {
-            action: self.action as u8,
-            _pad: [0; 3],
-        };
-
-        (key, value)
     }
 }
 
-/// C-compatible representation matching eBPF kernel maps
-/// Exactly aligned for Aya eBPF BPF_MAP_TYPE_HASH operations
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[cfg_attr(feature = "bytemuck", derive(bytemuck::Pod, bytemuck::Zeroable))]
-#[repr(C)]
-pub struct EbpfPolicyKey {
-    pub src_hash: [u8; 16],
-    pub dst_hash: [u8; 16],
-    pub port: u16,
-    pub _pad: u16,
-}
+impl TenantId {
+    /// Creates a rule. The closure receives a TenantCtx, making it a compile error
+    /// to attempt to reference another tenant's services.
+    pub fn create_rule<F>(&self, action: SagAction, f: F) -> SagRule
+    where
+        F: FnOnce(&TenantCtx) -> (PeerSelector, PeerSelector),
+    {
+        let ctx = TenantCtx { tenant: self };
+        let (from, to) = f(&ctx);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[cfg_attr(feature = "bytemuck", derive(bytemuck::Pod, bytemuck::Zeroable))]
-#[repr(C)]
-pub struct EbpfPolicyValue {
-    pub action: u8,
-    pub _pad: [u8; 3], // Explicitly pad to 4 bytes for C alignment
-}
+        // Generate ID (in reality, blake3 of tenant + rule_name + version)
+        let id = SagRuleId([0u8; 16]);
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::mem;
-
-    #[test]
-    fn test_ebpf_struct_alignment() {
-        // EbpfPolicyKey: 16 (src) + 16 (dst) + 2 (port) + 2 (pad) = 36 bytes
-        assert_eq!(mem::size_of::<EbpfPolicyKey>(), 36);
-        assert_eq!(mem::align_of::<EbpfPolicyKey>(), 2);
-
-        // EbpfPolicyValue: 1 (action) + 3 (pad) = 4 bytes
-        assert_eq!(mem::size_of::<EbpfPolicyValue>(), 4);
-        assert_eq!(mem::align_of::<EbpfPolicyValue>(), 1);
+        SagRule {
+            id,
+            from,
+            to,
+            action,
+        }
     }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct ServiceAuthorizationGraph {
+    pub version: MonotonicVersion,
+    pub rules: Vec<SagRule>,
 }

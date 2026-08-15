@@ -1,21 +1,26 @@
-// build.rs
-// Compiles Protobuf definitions in proto/v1/ into Rust code during `cargo build`
+// SPDX-License-Identifier: Apache-2.0
+use std::path::PathBuf;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let proto_files = &[
-        "proto/v1/identity.proto",
-        "proto/v1/state.proto",
-        "proto/v1/secret.proto",
+    let proto_dir = PathBuf::from("proto");
+
+    // Collect all proto files
+    let protos = [
+        proto_dir.join("identity.proto"),
+        proto_dir.join("state.proto"),
+        proto_dir.join("secret.proto"),
     ];
 
-    tonic_prost_build::configure()
-        .build_server(true) // Generate gRPC server traits
-        .build_client(true) // Generate gRPC client structs
-        .compile_protos(proto_files, &["proto/v1"])?;
-
-    for proto in proto_files {
-        println!("cargo:rerun-if-changed={}", proto);
+    // Tell Cargo to rerun this build script if any proto file changes
+    for proto in &protos {
+        println!("cargo:rerun-if-changed={}", proto.display());
     }
+
+    // Use tonic_prost_build (not tonic_build) to configure and compile
+    tonic_prost_build::configure()
+        .build_server(true)
+        .build_client(true)
+        .compile_protos(&protos, &[proto_dir])?;
 
     Ok(())
 }

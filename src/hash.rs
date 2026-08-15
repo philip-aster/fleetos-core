@@ -1,73 +1,46 @@
-// Truncated 128-bit BLAKE3 identity fingerprinting engine for eBPF maps
+// SPDX-License-Identifier: Apache-2.0
+//! 128-bit BLAKE3 fingerprints for eBPF and router hot-paths.
 
-use crate::spiffe::SpiffeId;
-use serde::{Deserialize, Serialize};
-use std::fmt;
-use std::ops::Deref;
+use crate::spiffe::{SpiffeId, WorkloadRole};
+use std::cmp::Ordering;
 
-/// Fixed 16-byte (128-bit) fingerprint optimized for eBPF map keys
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[cfg_attr(feature = "bytemuck", derive(bytemuck::Pod, bytemuck::Zeroable))]
+/// Frozen 16-byte layout for eBPF maps.
 #[repr(C)]
-pub struct IdentityHash(pub [u8; 16]);
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct IdentityFingerprint(pub [u8; 16]);
 
-impl IdentityHash {
-    pub fn from_spiffe(spiffe_id: &SpiffeId) -> Self {
-        let uri = spiffe_id.to_uri();
-        Self::from_bytes(uri.as_bytes())
-    }
-
-    pub fn from_bytes(bytes: &[u8]) -> Self {
+impl IdentityFingerprint {
+    /// Domain separated hash: `hash(id_string || 0x00 || role_string_or_empty)`
+    pub fn of(id: &SpiffeId, role: Option<&WorkloadRole>) -> Self {
         let mut hasher = blake3::Hasher::new();
-        hasher.update(bytes);
-        let mut output = [0u8; 16];
-        hasher.finalize_xof().fill(&mut output);
-        IdentityHash(output)
-    }
+        hasher.update(id.to_string().as_bytes());
+        hasher.update(&[0x00]); // domain separator
 
-    pub fn as_bytes(&self) -> &[u8; 16] {
-        &self.0
-    }
-}
-
-// Inside src/spiffe.rs or src/hash.rs
-impl From<&SpiffeId> for IdentityHash {
-    fn from(spiffe_id: &SpiffeId) -> Self {
-        IdentityHash::from_spiffe(spiffe_id)
-    }
-}
-
-impl From<[u8; 16]> for IdentityHash {
-    fn from(bytes: [u8; 16]) -> Self {
-        IdentityHash(bytes)
-    }
-}
-
-impl AsRef<[u8]> for IdentityHash {
-    fn as_ref(&self) -> &[u8] {
-        &self.0
-    }
-}
-
-impl Deref for IdentityHash {
-    type Target = [u8; 16];
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl fmt::Display for IdentityHash {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:x}", self)
-    }
-}
-
-impl fmt::LowerHex for IdentityHash {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        for byte in &self.0 {
-            write!(f, "{:02x}", byte)?;
+        if let Some(r) = role {
+            hasher.update(r.0.as_bytes());
         }
-        Ok(())
+
+        let mut out = [0u8; 16];
+        let full_hash = hasher.finalize();
+        out.copy_from_slice(&full_hash.as_bytes()[..16]);
+        Self(out)
+    }
+}
+
+impl PartialOrd for IdentityFingerprint {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for IdentityFingerprint {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.0.cmp(&other.0)
+    }
+}
+
+impl AsRef<[u8; 16]> for IdentityFingerprint {
+    fn as_ref(&self) -> &[u8; 16] {
+        &self.0
     }
 }

@@ -1,0 +1,61 @@
+syntax = "proto3";
+
+package fleetos.identity;
+
+// The Attestation Service handles verifying hardware quotes and join tokens.
+service AttestationService {
+    rpc RequestNonce(NonceRequest) returns (NonceResponse);
+    rpc SubmitQuote(AttestationQuote) returns (AttestedIdentity);
+}
+
+// The CA Service handles signing CSRs once attestation is verified.
+service CaService {
+    rpc SubmitCsr(CsrRequest) returns (SvidResponse);
+    rpc GetTrustBundle(TrustBundleRequest) returns (TrustBundle);
+}
+
+message NonceRequest {
+    string claimed_spiffe_id = 1;
+}
+
+message NonceResponse {
+    bytes nonce = 1;
+}
+
+// Moved QuoteType to the top level so both messages can use it cleanly.
+enum QuoteType {
+    TPM2 = 0;
+    APPLE_SE = 1;
+    VSOCK = 2;
+}
+
+message AttestationQuote {
+    QuoteType quote_type = 1;
+    bytes raw_quote = 2;
+    bytes raw_signature = 3;
+    string join_token = 4;
+}
+
+message AttestedIdentity {
+    string claimed_spiffe_id = 1;
+    QuoteType quote_type = 2;
+    bytes pcr_digest = 3;
+    int64 verified_at_unix = 4;
+}
+
+message CsrRequest {
+    bytes csr_der = 1;
+}
+
+message SvidResponse {
+    bytes cert_chain_der = 1;
+    bytes keypair_der = 2;
+    uint64 svid_version = 3;
+}
+
+message TrustBundleRequest {}
+
+message TrustBundle {
+    string trust_domain = 1;
+    repeated bytes roots_der = 2;
+}

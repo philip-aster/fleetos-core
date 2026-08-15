@@ -2,42 +2,68 @@
 name = "fleetos-core"
 version = "0.1.0"
 edition = "2024"
+license = "Apache-2.0"
 authors = ["Philip Aster and the FleetOS Contributors"]
-description = "Core identity primitives, cryptographic hashing, and protobuf schemas for FleetOS."
-
-[dependencies]
-# Cryptography & Hashing
-aes-gcm = "0.11.0"
-blake3 = "1.8.6"
-sha2 = "0.11.0"
-rand = "0.10.2"
-der = { version = "0.8.1", features = ["derive", "alloc"] }
-rcgen = { version = "0.14.8", features = ["x509-parser"] }
-x509-cert = { version = "0.3.0", features = ["builder", "pem"] }
-
-# Utility & Async
-anyhow = "1.0.104"
-async-trait = "0.1.91"
-hex = "0.4.3"
-serde = { version = "1.0.229", features = ["derive"] }
-thiserror = "2.0.19"
-tokio = { version = "1.53.1", features = ["full"], optional = true }
-
-# eBPF / TPM Hardware Hardware Security (Optional Features)
-bytemuck = { version = "1.25.2", features = ["derive"], optional = true }
-tss-esapi = { version = "7.7.0", optional = true }
-
-# gRPC & Protobuf Infrastructure
-prost = "0.14.4"
-tonic = "0.14.6"
-tonic-prost = "0.14.6"
+description = "Core primitives, identity, and protocol definitions for FleetOS"
 
 [features]
-default = ["std"]
-std = []
-tpm = ["dep:tss-esapi"]
-tokio = ["dep:tokio"]
-bytemuck = ["dep:bytemuck"]
+default = ["minimal"]
+
+# Base primitives required by almost everyone
+minimal = ["dep:blake3", "dep:prost", "dep:tonic", "dep:bytes"]
+
+# Attestation backends (All imply `minimal` so they have SpiffeId/Hash/Proto)
+tpm = ["minimal", "dep:tss-esapi", "dep:sha2"]
+apple-se = ["minimal", "dep:security-framework", "dep:sha2"]
+vsock-attest = ["minimal", "dep:vsock", "dep:sha2"]
+
+# CA signing helpers (fleetos-control only)
+ca = ["minimal", "dep:rcgen", "dep:x509-cert", "dep:der"]
+
+# Mock attestation. STRICTLY excluded from release builds via compile_error!
+dev = ["minimal"]
+
+# Meta-feature
+full = ["tpm", "apple-se", "vsock-attest", "ca", "dev"]
+
+blake3 = ["dep:blake3"]
+bytes = ["dep:bytes"]
+rcgen = ["dep:rcgen"]
+x509-cert = ["dep:x509-cert"]
+der = ["dep:der"]
+tonic = ["dep:tonic"]
+prost = ["dep:prost"]
+tss-esapi = ["dep:tss-esapi"]
+sha2 = ["dep:sha2"]
+
+
+[dependencies]
+async-trait = "0.1.92"
+blake3 = { version = "1.8.6", optional = true }
+bytes = { version = "1.12.1", optional = true }
+chacha20poly1305 = "0.11.0"
+der = { version = "0.8.1", optional = true }
+getrandom = "0.4.3"
+prost = { version = "0.14.4", optional = true }
+rand = "0.10.2"
+rand_core = "0.10.1"
+rcgen = { version = "0.14.9", optional = true }
+rustls = "0.23.43"
+security-framework = { version = "3.7.0", optional = true }
+serde = { version = "1.0.229", features = ["derive"] }
+sha2 = { version = "0.11.0", optional = true }
+thiserror = "2.0.20"
+tonic = { version = "0.14.6", optional = true }
+tracing = "0.1.44"
+tss-esapi = { version = "7.7.0", optional = true }
+vsock = { version = "0.5.4", optional = true }
+x25519-dalek = { version = "3.0.0", features = ["getrandom", "static_secrets"] }
+x509-cert = { version = "0.3.0", features = ["builder"], optional = true }
 
 [build-dependencies]
 tonic-prost-build = "0.14.6"
+
+
+# Ensure dev feature triggers compile error if not explicitly allowed
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(fleetos_dev)'] }
