@@ -6,7 +6,8 @@ use crate::spiffe::WorkloadRole;
 use crate::tenant::TenantId;
 use crate::version::MonotonicVersion;
 
-use alloc::string::{String, ToString};
+use alloc::string::String;
+use alloc::string::ToString;
 use alloc::vec::Vec;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -90,6 +91,8 @@ impl TenantId {
     }
 }
 
+// Gated out of no_std profile to remove Vec/alloc dependency for eBPF
+#[cfg(feature = "minimal")]
 #[derive(Debug, Clone, Default)]
 pub struct ServiceAuthorizationGraph {
     pub version: MonotonicVersion,

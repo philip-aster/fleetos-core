@@ -1,0 +1,54 @@
+syntax = "proto3";
+
+package fleetos.provisioning;
+
+service ProvisioningService {
+  rpc ReconcileNodePool(NodePoolSpec) returns (NodePoolStatus);
+  rpc GetNodePoolStatus(NodePoolId) returns (NodePoolStatus);
+  rpc DeleteNodePool(NodePoolId) returns (Empty);
+}
+
+message Empty {}
+
+message NodePoolId {
+  string pool_id = 1;
+}
+
+enum NodeKind {
+  CONTROL = 0;
+  AGENT = 1;
+  ROUTER = 2;
+  GATEWAY = 3;
+  FLEETCTL_PROXY = 4;
+}
+
+message ResourceSpec {
+  uint32 vcpus = 1;
+  uint32 memory_mb = 2;
+  uint32 disk_gb = 3;
+}
+
+message NodePoolSpec {
+  string pool_id = 1;
+  NodeKind node_kind = 2;
+  uint32 desired_count = 3;
+  ResourceSpec resources = 4;
+  string region_hint = 5;
+  bytes bootstrap_payload = 6; // opaque to the provider — Join Token + node-kind config
+}
+
+enum NodeLifecycleState {
+  PENDING = 0;
+  RUNNING = 1;
+  TERMINATED = 2;
+}
+
+message ProvisionedNode {
+  string provider_handle = 1;
+  NodeLifecycleState state = 2;
+}
+
+message NodePoolStatus {
+  string pool_id = 1;
+  repeated ProvisionedNode nodes = 2;
+}

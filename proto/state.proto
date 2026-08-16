@@ -6,65 +6,66 @@ import "identity.proto";
 
 // Pushes Service Authorization Graph (SAG) updates to nodes.
 service PolicyService {
-    // Streams SAG updates. Client sends its last known version.
-    rpc WatchSag(WatchRequest) returns (stream SagUpdate);
+  // Streams SAG updates. Client sends its last known version.
+  rpc WatchSag(WatchRequest) returns (stream SagUpdate);
 }
 
 // Pushes workload schedules to agents.
 service SchedulerService {
-    rpc WatchSchedule(WatchRequest) returns (stream ScheduleUpdate);
+  rpc WatchSchedule(WatchRequest) returns (stream ScheduleUpdate);
 }
 
 // Pushes routing tables to routers.
 service RouterAssignmentService {
-    rpc WatchRoutes(WatchRequest) returns (stream RouteUpdate);
+  rpc WatchRoutes(WatchRequest) returns (stream RouteUpdate);
 }
 
 message WatchRequest {
-    uint64 last_known_version = 1;
+  uint64 last_known_version = 1;
 }
 
 message SagUpdate {
-    uint64 version = 1; // Matches Raft log index
-    repeated SagRule rules = 2;
+  uint64 version = 1; // Matches Raft log index
+  repeated SagRule rules = 2;
+  repeated bytes revoked_delegation_ids = 3; // Fast-cutoff defense-in-depth for degraded mode
 }
 
 message SagRule {
-    string id = 1; // 16-byte hex string
-    PeerSelector from = 2;
-    PeerSelector to = 3;
-    enum Action {
-        ALLOW = 0;
-        DENY = 1;
-    }
-    Action action = 4;
+  string id = 1; // 16-byte hex string
+  PeerSelector from = 2;
+  PeerSelector to = 3;
+  enum Action {
+    ALLOW = 0;
+    DENY = 1;
+  }
+  Action action = 4;
 }
 
 message PeerSelector {
-    string tenant = 1;
-    string service_name = 2;
-    string role = 3; // Empty if not applicable
+  string tenant = 1;
+  string service_name = 2;
+  string role = 3; // Empty if not applicable
 }
 
 message ScheduleUpdate {
-    uint64 version = 1;
-    repeated WorkloadAssignment assignments = 2;
+  uint64 version = 1;
+  repeated WorkloadAssignment assignments = 2;
 }
 
 message WorkloadAssignment {
-    string workload_id = 1;
-    string runtime = 2; // "containerd" or "cloud-hypervisor"
-    string image = 3;
-    string role = 4;
+  string workload_id = 1;
+  string runtime = 2; // "containerd" or "cloud-hypervisor"
+  string image = 3;
+  string role = 4;
 }
 
 message RouteUpdate {
-    uint64 version = 1;
-    repeated RouteEntry routes = 2;
+  uint64 version = 1;
+  repeated RouteEntry routes = 2;
 }
 
 message RouteEntry {
-    string destination_svid = 1;
-    string destination_role = 2;
-    string target_agent_svid = 3; // RouteHint
+  string destination_svid = 1;
+  string destination_role = 2;
+  string target_agent_svid = 3; // RouteHint
 }

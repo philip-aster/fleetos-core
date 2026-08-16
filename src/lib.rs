@@ -35,11 +35,15 @@ pub mod proto;
 
 pub use hash::IdentityFingerprint;
 pub use mesh::MeshAddress;
-pub use policy::{SagRule, SagRuleId, ServiceAuthorizationGraph, TenantCtx};
+pub use policy::{PeerSelector, SagAction, SagRule, SagRuleId, TenantCtx};
 pub use spiffe::{SpiffeId, WorkloadRole};
 pub use tenant::TenantId;
 pub use time::{Expiring, Ttl};
 pub use version::MonotonicVersion;
+
+// Vec-bearing container gated out of no_std/eBPF profile
+#[cfg(feature = "minimal")]
+pub use policy::ServiceAuthorizationGraph;
 
 #[cfg(feature = "minimal")]
 pub use nonce::Nonce;

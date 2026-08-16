@@ -1,22 +1,22 @@
 // SPDX-License-Identifier: Apache-2.0
 //! SPIFFE Identity and X.509 SVID construction.
 
+use alloc::string::String;
+use alloc::string::ToString;
+use alloc::vec::Vec;
 use core::cmp::Ordering;
 use core::fmt;
 use core::str::FromStr;
-
-use alloc::string::{String, ToString};
-use alloc::vec::Vec;
-
 use thiserror::Error;
 
 /// FleetOS IANA Private Enterprise Number (PEN).
 /// TODO (Project Manager): Replace `99999` with the official assigned PEN from IANA.
 pub const FLEETOS_IANA_PEN: u64 = 99999;
 
-/// Placeholder OID for FleetOS Role Extension.
-/// TODO: Update string with the new PEN once assigned (e.g., "1.3.6.1.4.1.{PEN}.1.1").
+// Custom OID Arcs under the FleetOS PEN
 pub const FLEETOS_ROLE_OID: &str = "1.3.6.1.4.1.99999.1.1";
+pub const FLEETOS_DEGRADED_OID: &str = "1.3.6.1.4.1.99999.1.2";
+pub const FLEETOS_ORDINAL_OID: &str = "1.3.6.1.4.1.99999.1.3";
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Error)]
 pub enum SvidError {
@@ -153,26 +153,57 @@ impl fmt::Display for WorkloadRole {
 }
 
 /// Extracts the role from a DER-encoded X.509 certificate without full parsing.
-/// Looks for the raw OID bytes in the certificate blob.
 pub fn extract_role(cert_der: &[u8]) -> Option<WorkloadRole> {
-    // Implementation uses `x509-parser` to find the specific extension
-    // by OID and extract the UTF-8 string value.
     let _ = cert_der;
     None
 }
 
+/// Extracts the ordinal (replica instance) from a DER-encoded X.509 certificate.
+pub fn extract_ordinal(cert_der: &[u8]) -> Option<u32> {
+    let _ = cert_der;
+    None
+}
+
+/// Checks for the degraded-mode marker in a DER-encoded X.509 certificate.
+pub fn is_degraded(cert_der: &[u8]) -> bool {
+    let _ = cert_der;
+    false
+}
+
 /// Trust Bundle is available to ALL nodes, not just the CA.
-/// Every node needs this to validate peer SVIDs.
 #[derive(Debug, Clone)]
 pub struct TrustBundle {
     pub trust_domain: String,
-    pub roots: Vec<Vec<u8>>, // DER encoded root certs
+    pub roots: Vec<Vec<u8>>,
 }
 
-/// Validates an SVID against the trust bundle. Available to all nodes.
+/// Validates an SVID against the trust bundle.
 pub fn validate_svid(_cert_der: &[u8], _trust_bundle: &TrustBundle) -> Result<SpiffeId, SvidError> {
-    // Uses rustls to verify chain, then extracts SAN URI.
     Err(SvidError::Unimplemented)
+}
+
+/// Deterministic identifier for a delegation session.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct DelegationId(pub [u8; 16]);
+
+/// A delegated signing key granted to a node for degraded-mode SVID renewal.
+pub struct DelegatedSigningKey {
+    pub node_id: SpiffeId,
+    pub issued_at_unix: u64,
+    pub expires_at_unix: u64,
+}
+
+impl DelegatedSigningKey {
+    pub fn delegation_id(&self) -> DelegationId {
+        let mut hasher = blake3::Hasher::new();
+        hasher.update(self.node_id.to_string().as_bytes());
+        hasher.update(&self.issued_at_unix.to_le_bytes());
+
+        let mut id_bytes = [0u8; 16];
+        let hash = hasher.finalize();
+        id_bytes.copy_from_slice(&hash.as_bytes()[..16]);
+        DelegationId(id_bytes)
+    }
 }
 
 // --- CA Specific Functionality (Only compiled for fleetos-control) ---
@@ -180,7 +211,7 @@ pub fn validate_svid(_cert_der: &[u8], _trust_bundle: &TrustBundle) -> Result<Sp
 pub mod ca {
     use super::*;
     use rcgen::{Certificate, CertificateParams, KeyPair};
-    use zeroize::Zeroizing; // Moved import inside the feature-gated module
+    use zeroize::Zeroizing;
 
     pub struct Csr {
         pub der: Vec<u8>,
@@ -188,7 +219,6 @@ pub mod ca {
 
     pub struct X509Svid {
         pub cert_chain_der: Vec<u8>,
-        // Zeroized on drop to protect private key material
         pub keypair_der: Zeroizing<Vec<u8>>,
     }
 
@@ -207,6 +237,20 @@ pub mod ca {
         _ca_cert: &Certificate,
         _ca_key: &KeyPair,
     ) -> Result<X509Svid, SvidError> {
+        Err(SvidError::Unimplemented)
+    }
+
+    /// Renews an SVID using a delegated key.
+    /// Structurally cannot mint for anything else: takes the existing SVID to renew.
+    pub fn sign_svid_delegated(
+        _key: &DelegatedSigningKey,
+        _existing_svid: &X509Svid,
+        _new_validity: Duration,
+    ) -> Result<X509Svid, SvidError> {
+        // Implementations must verify:
+        // 1. existing_svid belongs to key.node_id
+        // 2. existing_svid is not yet expired
+        // 3. ordinal matches (if present)
         Err(SvidError::Unimplemented)
     }
 }
