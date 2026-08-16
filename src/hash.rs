@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 //! 128-bit BLAKE3 fingerprints for eBPF and router hot-paths.
 
-use crate::spiffe::{SpiffeId, WorkloadRole};
-use alloc::string::ToString;
 use bytemuck::{Pod, Zeroable};
 use core::cmp::Ordering;
 
@@ -15,16 +13,69 @@ pub struct IdentityFingerprint(pub [u8; 16]);
 const _: () = assert!(core::mem::size_of::<IdentityFingerprint>() == 16);
 const _: () = assert!(core::mem::align_of::<IdentityFingerprint>() == 1);
 
-impl IdentityFingerprint {
-    /// Domain separated hash: `hash(id_string || 0x00 || role_string_or_empty)`
-    pub fn of(id: &SpiffeId, role: Option<&WorkloadRole>) -> Self {
-        let mut hasher = blake3::Hasher::new();
-        hasher.update(id.to_string().as_bytes());
-        hasher.update(&[0x00]); // domain separator
+#[cfg(feature = "minimal")]
+use crate::spiffe::{SpiffeId, WorkloadRole};
 
+#[cfg(feature = "minimal")]
+impl IdentityFingerprint {
+    /// Domain separated hash: `id_string || 0x00 || role_string_or_empty || 0x00 || ordinal_bytes`
+    /// Uses zero-allocation direct byte feeding instead of `.to_string()`.
+    pub fn of_with_ordinal(
+        id: &SpiffeId,
+        role: Option<&WorkloadRole>,
+        ordinal: Option<u32>,
+    ) -> Self {
+        let mut hasher = blake3::Hasher::new();
+
+        // Write URI components directly without allocating
+        id.write_uri_bytes(&mut hasher);
+
+        hasher.update(&[0x00]); // domain separator
         if let Some(r) = role {
             hasher.update(r.0.as_bytes());
         }
+
+        hasher.update(&[0x00]); // domain separator
+        if let Some(o) = ordinal {
+            hasher.update(&o.to_le_bytes());
+        }
+
+        let mut out = [0u8; 16];
+        let full_hash = hasher.finalize();
+        out.copy_from_slice(&full_hash.as_bytes()[..16]);
+        Self(out)
+    }
+
+    pub fn of(id: &SpiffeId, role: Option<&WorkloadRole>) -> Self {
+        Self::of_with_ordinal(id, role, None)
+    }
+
+    /// Standardized hashing for SagRuleId to align with IdentityFingerprint
+    pub fn of_rule(
+        tenant: &str,
+        from_service: &str,
+        from_role: Option<&WorkloadRole>,
+        to_service: &str,
+        to_role: Option<&WorkloadRole>,
+        action: &str,
+    ) -> Self {
+        let mut hasher = blake3::Hasher::new();
+        hasher.update(tenant.as_bytes());
+        hasher.update(&[0x00]);
+
+        hasher.update(from_service.as_bytes());
+        if let Some(r) = from_role {
+            hasher.update(r.0.as_bytes());
+        }
+        hasher.update(&[0x00]);
+
+        hasher.update(to_service.as_bytes());
+        if let Some(r) = to_role {
+            hasher.update(r.0.as_bytes());
+        }
+        hasher.update(&[0x00]);
+
+        hasher.update(action.as_bytes());
 
         let mut out = [0u8; 16];
         let full_hash = hasher.finalize();

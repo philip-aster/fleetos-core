@@ -7,7 +7,6 @@ use crate::tenant::TenantId;
 use crate::version::MonotonicVersion;
 
 use alloc::string::String;
-use alloc::string::ToString;
 use alloc::vec::Vec;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -67,23 +66,23 @@ impl TenantId {
         let ctx = TenantCtx { tenant: self };
         let (from, to) = f(&ctx);
 
-        let mut hasher = blake3::Hasher::new();
-        hasher.update(self.to_string().as_bytes());
-        hasher.update(from.service.name.as_bytes());
-        if let Some(r) = &from.role {
-            hasher.update(r.0.as_bytes());
-        }
-        hasher.update(to.service.name.as_bytes());
-        if let Some(r) = &to.role {
-            hasher.update(r.0.as_bytes());
-        }
+        // Align evaluation to use IdentityFingerprint directly
+        let action_str = match action {
+            SagAction::Allow => "ALLOW",
+            SagAction::Deny => "DENY",
+        };
 
-        let mut id_bytes = [0u8; 16];
-        let hash = hasher.finalize();
-        id_bytes.copy_from_slice(&hash.as_bytes()[..16]);
+        let fingerprint = crate::hash::IdentityFingerprint::of_rule(
+            self.as_str(),
+            from.service.name.as_str(),
+            from.role.as_ref(),
+            to.service.name.as_str(),
+            to.role.as_ref(),
+            action_str,
+        );
 
         SagRule {
-            id: SagRuleId(id_bytes),
+            id: SagRuleId(fingerprint.0),
             from,
             to,
             action,
@@ -91,8 +90,6 @@ impl TenantId {
     }
 }
 
-// Gated out of no_std profile to remove Vec/alloc dependency for eBPF
-#[cfg(feature = "minimal")]
 #[derive(Debug, Clone, Default)]
 pub struct ServiceAuthorizationGraph {
     pub version: MonotonicVersion,

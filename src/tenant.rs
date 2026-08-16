@@ -14,6 +14,10 @@ impl TenantId {
         }
         Ok(Self(id))
     }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
 }
 
 impl fmt::Display for TenantId {
