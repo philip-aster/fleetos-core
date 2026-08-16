@@ -18,8 +18,35 @@ use crate::spiffe::{SpiffeId, WorkloadRole};
 
 #[cfg(feature = "minimal")]
 impl IdentityFingerprint {
-    /// Domain separated hash: `id_string || 0x00 || role_string_or_empty || 0x00 || ordinal_bytes`
+    /// Domain separated hash: `id_string || 0x00 || role_string_or_empty`
     /// Uses zero-allocation direct byte feeding instead of `.to_string()`.
+    pub fn of(id: &SpiffeId, role: Option<&WorkloadRole>) -> Self {
+        let mut hasher = blake3::Hasher::new();
+
+        // Write URI components directly without allocating
+        id.write_uri_bytes(&mut hasher);
+
+        hasher.update(&[0x00]); // domain separator
+        if let Some(r) = role {
+            hasher.update(r.0.as_bytes());
+        }
+
+        let mut out = [0u8; 16];
+        let full_hash = hasher.finalize();
+        out.copy_from_slice(&full_hash.as_bytes()[..16]);
+        Self(out)
+    }
+
+    /// Computes a per-instance (ordinal-scoped) identity fingerprint.
+    ///
+    /// # DO NOT USE for standard role-based routing.
+    /// This produces a fingerprint distinct per ordinal, which breaks the
+    /// "any of N replicas can serve this role" load-balancing semantics that
+    /// `of()` provides. Only call this if the caller's policy schema has an
+    /// explicit, deliberate per-instance addressing field (none currently
+    /// exist in PeerSelector/SagRule/WorkloadSpec as of this writing) — never
+    /// as a substitute for `of()` in ordinary routing/policy code.
+    #[cfg(feature = "experimental-ordinal-routing")]
     pub fn of_with_ordinal(
         id: &SpiffeId,
         role: Option<&WorkloadRole>,
@@ -27,7 +54,6 @@ impl IdentityFingerprint {
     ) -> Self {
         let mut hasher = blake3::Hasher::new();
 
-        // Write URI components directly without allocating
         id.write_uri_bytes(&mut hasher);
 
         hasher.update(&[0x00]); // domain separator
@@ -44,10 +70,6 @@ impl IdentityFingerprint {
         let full_hash = hasher.finalize();
         out.copy_from_slice(&full_hash.as_bytes()[..16]);
         Self(out)
-    }
-
-    pub fn of(id: &SpiffeId, role: Option<&WorkloadRole>) -> Self {
-        Self::of_with_ordinal(id, role, None)
     }
 
     /// Standardized hashing for SagRuleId to align with IdentityFingerprint

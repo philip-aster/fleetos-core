@@ -29,6 +29,9 @@ full = ["tpm", "apple-se", "vsock-attest", "ca", "dev"]
 # Meta-feature for everything except mock/dev attestation
 production = ["tpm", "apple-se", "vsock-attest", "ca"]
 
+# Future sharded/stateful-partition addressing model
+experimental-ordinal-routing = []
+
 bytes = ["dep:bytes"]
 rcgen = ["dep:rcgen"]
 x509-cert = ["dep:x509-cert"]
