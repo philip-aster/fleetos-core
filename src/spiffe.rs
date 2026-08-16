@@ -1,12 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 //! SPIFFE Identity and X.509 SVID construction.
 
-use alloc::string::String;
-use alloc::string::ToString;
-use alloc::vec::Vec;
 use core::cmp::Ordering;
 use core::fmt;
 use core::str::FromStr;
+
+use alloc::string::String;
+use alloc::string::ToString;
+use alloc::vec::Vec;
+
 use thiserror::Error;
 
 /// FleetOS IANA Private Enterprise Number (PEN).
@@ -40,6 +42,8 @@ pub enum SvidError {
     DelegationKeyExpired,
     #[error("node ID mismatch")]
     NodeIdMismatch,
+    #[error("ordinal mismatch")]
+    OrdinalMismatch,
     #[error("validity overrun")]
     ValidityOverrun,
 }
@@ -326,6 +330,7 @@ pub struct DelegatedSigningKey {
     pub node_id: SpiffeId,
     pub issued_at_unix: u64,
     pub expires_at_unix: u64,
+    pub ordinal: Option<u32>, // Added ordinal field
 }
 
 impl DelegatedSigningKey {
@@ -348,7 +353,7 @@ pub mod ca {
     use super::*;
     use core::time::Duration;
     use rcgen::{Certificate, KeyPair};
-    use zeroize::Zeroizing; // Moved import here to fix warning
+    use zeroize::Zeroizing;
 
     pub struct Csr {
         pub der: Vec<u8>,
@@ -394,10 +399,13 @@ pub mod ca {
             return Err(SvidError::NodeIdMismatch);
         }
 
-        // FIX: Removed the existing_svid.expires_at_unix check to allow renewing
-        // already expired SVIDs during connectivity outages (degraded mode purpose).
+        // 3. Ordinal Scoping
+        let svid_ordinal = extract_ordinal(&existing_svid.cert_chain_der);
+        if svid_ordinal != key.ordinal {
+            return Err(SvidError::OrdinalMismatch);
+        }
 
-        // 3. Validity Window
+        // 4. Validity Window
         let remaining_window = key.expires_at_unix - current_unix_time;
         if new_validity.as_secs() > remaining_window {
             return Err(SvidError::ValidityOverrun);
