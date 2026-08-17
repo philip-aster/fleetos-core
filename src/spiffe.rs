@@ -7,6 +7,8 @@ use core::fmt;
 use core::str::FromStr;
 
 use thiserror::Error;
+// `tracing` is available because this module is gated behind `feature = "minimal"`
+use tracing::warn;
 
 /// FleetOS IANA Private Enterprise Number (PEN).
 /// TODO (Project Manager): Replace `99999` with the official assigned PEN from IANA.
@@ -299,14 +301,40 @@ fn find_oid_extension<'a>(cert_der: &'a [u8], oid: &[u8]) -> Option<&'a [u8]> {
 }
 
 /// Extracts the role from a DER-encoded X.509 certificate without full parsing.
+/// Emits a `warn` log if an extension is found but is corrupt/invalid.
 pub fn extract_role(cert_der: &[u8]) -> Option<WorkloadRole> {
+    // Case 1: No extension found (benign)
     let val = find_oid_extension(cert_der, &FLEETOS_ROLE_OID_BYTES)?;
+
     // Value is wrapped in a UTF8String (0x0C) or PrintableString (0x13)
     let string_bytes = parse_der_tlv(val, 0x0C)
         .or_else(|| parse_der_tlv(val, 0x13))
         .unwrap_or(val);
-    let role_str = core::str::from_utf8(string_bytes).ok()?;
-    WorkloadRole::try_from(role_str).ok() // Silently rejects embedded NUL bytes
+
+    // Case 2: Extension present, but invalid UTF-8
+    let role_str = match core::str::from_utf8(string_bytes) {
+        Ok(s) => s,
+        Err(_) => {
+            warn!(
+                target: "fleetos::spiffe::extract_role",
+                "Role extension present in SVID but contains invalid UTF-8. Possible corruption or tampering."
+            );
+            return None;
+        }
+    };
+
+    // Case 3: Extension present, but fails WorkloadRole validation (e.g. embedded NUL)
+    match WorkloadRole::try_from(role_str) {
+        Ok(role) => Some(role),
+        Err(e) => {
+            warn!(
+                target: "fleetos::spiffe::extract_role",
+                error = %e,
+                "Role extension present in SVID but failed validation. Possible corruption or tampering."
+            );
+            None
+        }
+    }
 }
 
 /// Extracts the ordinal (replica instance) from a DER-encoded X.509 certificate.
