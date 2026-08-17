@@ -4,11 +4,6 @@
 use core::cmp::Ordering;
 use core::fmt;
 use core::str::FromStr;
-
-use alloc::string::String;
-use alloc::string::ToString;
-use alloc::vec::Vec;
-
 use thiserror::Error;
 
 /// FleetOS IANA Private Enterprise Number (PEN).

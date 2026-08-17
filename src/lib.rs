@@ -7,8 +7,6 @@
 // Explicitly link `alloc` so ubiquitous modules can use `String` and `Vec`
 // directly via `alloc::...` paths in both `no_std` and `std` builds.
 #[cfg(feature = "minimal")]
-extern crate alloc;
-
 #[cfg(all(feature = "dev", not(fleetos_dev)))]
 compile_error!(
     "The `dev` feature is strictly for integration tests and must not be shipped. \

@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 // src/tenant.rs
-use alloc::string::String;
 use core::fmt;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
