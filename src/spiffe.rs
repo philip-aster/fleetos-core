@@ -2,8 +2,10 @@
 //! SPIFFE Identity and X.509 SVID construction.
 
 use core::cmp::Ordering;
+use core::convert::TryFrom;
 use core::fmt;
 use core::str::FromStr;
+
 use thiserror::Error;
 
 /// FleetOS IANA Private Enterprise Number (PEN).
@@ -41,6 +43,12 @@ pub enum SvidError {
     OrdinalMismatch,
     #[error("validity overrun")]
     ValidityOverrun,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Error)]
+pub enum RoleError {
+    #[error("role contains embedded NUL byte")]
+    EmbeddedNul,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -180,8 +188,37 @@ impl FromStr for SpiffeId {
 }
 
 /// Workload role (e.g., primary, replica). Not part of the URI.
+/// Validates against embedded NUL bytes to protect domain-separated hashing.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct WorkloadRole(pub String);
+pub struct WorkloadRole(String);
+
+impl TryFrom<String> for WorkloadRole {
+    type Error = RoleError;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        if value.contains('\0') {
+            return Err(RoleError::EmbeddedNul);
+        }
+        Ok(Self(value))
+    }
+}
+
+impl TryFrom<&str> for WorkloadRole {
+    type Error = RoleError;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        if value.contains('\0') {
+            return Err(RoleError::EmbeddedNul);
+        }
+        Ok(Self(value.to_string()))
+    }
+}
+
+impl WorkloadRole {
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
 
 impl fmt::Display for WorkloadRole {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -269,7 +306,7 @@ pub fn extract_role(cert_der: &[u8]) -> Option<WorkloadRole> {
         .or_else(|| parse_der_tlv(val, 0x13))
         .unwrap_or(val);
     let role_str = core::str::from_utf8(string_bytes).ok()?;
-    Some(WorkloadRole(role_str.to_string()))
+    WorkloadRole::try_from(role_str).ok() // Silently rejects embedded NUL bytes
 }
 
 /// Extracts the ordinal (replica instance) from a DER-encoded X.509 certificate.
@@ -325,7 +362,7 @@ pub struct DelegatedSigningKey {
     pub node_id: SpiffeId,
     pub issued_at_unix: u64,
     pub expires_at_unix: u64,
-    pub ordinal: Option<u32>, // Added ordinal field
+    pub ordinal: Option<u32>,
 }
 
 impl DelegatedSigningKey {

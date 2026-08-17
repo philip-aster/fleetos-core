@@ -23,12 +23,11 @@ impl IdentityFingerprint {
     pub fn of(id: &SpiffeId, role: Option<&WorkloadRole>) -> Self {
         let mut hasher = blake3::Hasher::new();
 
-        // Write URI components directly without allocating
         id.write_uri_bytes(&mut hasher);
 
         hasher.update(&[0x00]); // domain separator
         if let Some(r) = role {
-            hasher.update(r.0.as_bytes());
+            hasher.update(r.as_str().as_bytes()); // Updated to use as_str()
         }
 
         let mut out = [0u8; 16];
@@ -58,46 +57,13 @@ impl IdentityFingerprint {
 
         hasher.update(&[0x00]); // domain separator
         if let Some(r) = role {
-            hasher.update(r.0.as_bytes());
+            hasher.update(r.as_str().as_bytes()); // Updated to use as_str()
         }
 
         hasher.update(&[0x00]); // domain separator
         if let Some(o) = ordinal {
             hasher.update(&o.to_le_bytes());
         }
-
-        let mut out = [0u8; 16];
-        let full_hash = hasher.finalize();
-        out.copy_from_slice(&full_hash.as_bytes()[..16]);
-        Self(out)
-    }
-
-    /// Standardized hashing for SagRuleId to align with IdentityFingerprint
-    pub fn of_rule(
-        tenant: &str,
-        from_service: &str,
-        from_role: Option<&WorkloadRole>,
-        to_service: &str,
-        to_role: Option<&WorkloadRole>,
-        action: &str,
-    ) -> Self {
-        let mut hasher = blake3::Hasher::new();
-        hasher.update(tenant.as_bytes());
-        hasher.update(&[0x00]);
-
-        hasher.update(from_service.as_bytes());
-        if let Some(r) = from_role {
-            hasher.update(r.0.as_bytes());
-        }
-        hasher.update(&[0x00]);
-
-        hasher.update(to_service.as_bytes());
-        if let Some(r) = to_role {
-            hasher.update(r.0.as_bytes());
-        }
-        hasher.update(&[0x00]);
-
-        hasher.update(action.as_bytes());
 
         let mut out = [0u8; 16];
         let full_hash = hasher.finalize();

@@ -45,6 +45,7 @@ message PeerSelector {
   string tenant = 1;
   string service_name = 2;
   string role = 3; // Empty if not applicable
+  optional uint32 port = 4; // proto3 optional ensures None vs Some(0) survives the wire
 }
 
 message ScheduleUpdate {
