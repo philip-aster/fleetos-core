@@ -306,10 +306,17 @@ pub fn extract_role(cert_der: &[u8]) -> Option<WorkloadRole> {
     // Case 1: No extension found (benign)
     let val = find_oid_extension(cert_der, &FLEETOS_ROLE_OID_BYTES)?;
 
-    // Value is wrapped in a UTF8String (0x0C) or PrintableString (0x13)
-    let string_bytes = parse_der_tlv(val, 0x0C)
-        .or_else(|| parse_der_tlv(val, 0x13))
-        .unwrap_or(val);
+    // Value MUST be wrapped in a UTF8String (0x0C) or PrintableString (0x13)
+    let string_bytes = match parse_der_tlv(val, 0x0C).or_else(|| parse_der_tlv(val, 0x13)) {
+        Some(bytes) => bytes,
+        None => {
+            warn!(
+                target: "fleetos::spiffe::extract_role",
+                "Role extension present in SVID but missing required DER string tag (0x0C or 0x13). Possible corruption or tampering."
+            );
+            return None;
+        }
+    };
 
     // Case 2: Extension present, but invalid UTF-8
     let role_str = match core::str::from_utf8(string_bytes) {
