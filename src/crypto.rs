@@ -7,7 +7,6 @@ use chacha20poly1305::{
     Nonce as AeadNonce, // Alias to avoid collision with our attestation Nonce
     aead::{Aead, KeyInit, Payload},
 };
-
 use thiserror::Error;
 use x25519_dalek::{EphemeralSecret, PublicKey, StaticSecret};
 use zeroize::Zeroizing;
@@ -22,6 +21,9 @@ pub enum CryptoError {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct SecretSequence(pub u64);
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct RecipientX25519Pubkey(pub [u8; 32]);
+
 #[derive(Debug, Clone)]
 pub struct SealedSecret {
     pub sealed_for_svid_version: u64,
@@ -32,7 +34,7 @@ pub struct SealedSecret {
 
 /// Ephemeral X25519 key agreement against recipient SVID public key, ChaCha20Poly1305 AEAD.
 pub fn seal(
-    recipient_pubkey: &[u8; 32],
+    recipient_pubkey: &RecipientX25519Pubkey,
     plaintext: &[u8],
     svid_version: u64,
     sequence: SecretSequence,
@@ -42,7 +44,7 @@ pub fn seal(
     let eph_pubkey = PublicKey::from(&eph_secret);
 
     // 2. Diffie-Hellman key agreement
-    let recipient_pubkey = PublicKey::from(*recipient_pubkey);
+    let recipient_pubkey = PublicKey::from(recipient_pubkey.0);
     let shared_secret = eph_secret.diffie_hellman(&recipient_pubkey);
 
     // 3. Derive 32-byte symmetric key using BLAKE3 with explicit domain separation

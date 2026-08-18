@@ -5,9 +5,10 @@ use core::cmp::Ordering;
 use core::convert::TryFrom;
 use core::fmt;
 use core::str::FromStr;
-
+// Re-export Zeroizing so the struct definition above compiles cleanly
 use thiserror::Error;
 use tracing::warn;
+use zeroize::Zeroizing;
 
 /// FleetOS IANA Private Enterprise Number (PEN).
 pub const FLEETOS_IANA_PEN: u64 = 66561;
@@ -39,7 +40,7 @@ pub enum SvidError {
     #[error("delegation key expired")]
     DelegationKeyExpired,
     #[error("target SVID mismatch")]
-    TargetSvidMismatch, // Renamed from NodeIdMismatch
+    TargetSvidMismatch,
     #[error("ordinal mismatch")]
     OrdinalMismatch,
     #[error("validity overrun")]
@@ -59,6 +60,7 @@ pub enum IdKind {
     Router,
     Gateway,
     Ctrl,
+    Control,
 }
 
 impl fmt::Display for IdKind {
@@ -69,6 +71,7 @@ impl fmt::Display for IdKind {
             IdKind::Router => write!(f, "router"),
             IdKind::Gateway => write!(f, "gateway"),
             IdKind::Ctrl => write!(f, "ctrl"),
+            IdKind::Control => write!(f, "control"),
         }
     }
 }
@@ -82,6 +85,7 @@ impl FromStr for IdKind {
             "router" => Ok(IdKind::Router),
             "gateway" => Ok(IdKind::Gateway),
             "ctrl" => Ok(IdKind::Ctrl),
+            "control" => Ok(IdKind::Control),
             _ => Err(SvidError::InvalidKind),
         }
     }
@@ -95,6 +99,7 @@ pub(crate) fn kind_to_bytes(kind: &IdKind) -> &'static [u8] {
         IdKind::Router => b"router",
         IdKind::Gateway => b"gateway",
         IdKind::Ctrl => b"ctrl",
+        IdKind::Control => b"control",
     }
 }
 
@@ -123,6 +128,7 @@ impl SpiffeId {
     }
 
     /// Writes the URI bytes directly to a hasher without allocating a String.
+    /// Format: `spiffe://<trust-domain>/ns/<tenant>/<kind>/<name>`
     pub fn write_uri_bytes(&self, hasher: &mut blake3::Hasher) {
         hasher.update(b"spiffe://");
         hasher.update(self.trust_domain.as_bytes());
@@ -188,11 +194,13 @@ impl FromStr for SpiffeId {
 }
 
 /// Workload role (e.g., primary, replica). Not part of the URI.
+/// Validates against embedded NUL bytes to protect domain-separated hashing.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct WorkloadRole(String);
 
 impl TryFrom<String> for WorkloadRole {
     type Error = RoleError;
+
     fn try_from(value: String) -> Result<Self, Self::Error> {
         if value.contains('\0') {
             return Err(RoleError::EmbeddedNul);
@@ -203,6 +211,7 @@ impl TryFrom<String> for WorkloadRole {
 
 impl TryFrom<&str> for WorkloadRole {
     type Error = RoleError;
+
     fn try_from(value: &str) -> Result<Self, Self::Error> {
         if value.contains('\0') {
             return Err(RoleError::EmbeddedNul);
@@ -225,17 +234,21 @@ impl fmt::Display for WorkloadRole {
 
 // --- DER Parsing Helpers ---
 
+/// Parses DER length starting at `bytes[0]`.
+/// Returns (length, num_bytes_consumed_for_length_encoding)
 fn parse_der_length(bytes: &[u8]) -> Option<(usize, usize)> {
     if bytes.is_empty() {
         return None;
     }
     let b = bytes[0];
     if b < 0x80 {
+        // Short form
         Some((b as usize, 1))
     } else {
+        // Long form
         let n = (b & 0x7f) as usize;
         if n == 0 || n > 4 || bytes.len() < 1 + n {
-            return None;
+            return None; // Indefinite length or too large, invalid or unsupported
         }
         let mut len = 0usize;
         for i in 1..=n {
@@ -245,6 +258,7 @@ fn parse_der_length(bytes: &[u8]) -> Option<(usize, usize)> {
     }
 }
 
+/// Parses a DER Tag-Length-Value structure and returns the value slice.
 fn parse_der_tlv<'a>(bytes: &'a [u8], expected_tag: u8) -> Option<&'a [u8]> {
     if bytes.is_empty() || bytes[0] != expected_tag {
         return None;
@@ -257,6 +271,8 @@ fn parse_der_tlv<'a>(bytes: &'a [u8], expected_tag: u8) -> Option<&'a [u8]> {
     Some(&bytes[val_start..val_start + len])
 }
 
+/// Scans DER for an OID and returns the inner OCTET STRING value slice.
+/// Properly skips the optional `critical` BOOLEAN and supports long-form lengths.
 fn find_oid_extension<'a>(cert_der: &'a [u8], oid: &[u8]) -> Option<&'a [u8]> {
     if cert_der.len() < oid.len() {
         return None;
@@ -289,6 +305,7 @@ fn find_oid_extension<'a>(cert_der: &'a [u8], oid: &[u8]) -> Option<&'a [u8]> {
 }
 
 /// Extracts the role from a DER-encoded X.509 certificate without full parsing.
+/// Emits a `warn` log if an extension is found but is corrupt/invalid.
 pub fn extract_role(cert_der: &[u8]) -> Option<WorkloadRole> {
     let val = find_oid_extension(cert_der, &FLEETOS_ROLE_OID_BYTES)?;
 
@@ -327,6 +344,7 @@ pub fn extract_role(cert_der: &[u8]) -> Option<WorkloadRole> {
     }
 }
 
+/// Extracts the ordinal (replica instance) from a DER-encoded X.509 certificate.
 pub fn extract_ordinal(cert_der: &[u8]) -> Option<u32> {
     let val = find_oid_extension(cert_der, &FLEETOS_ORDINAL_OID_BYTES)?;
     let int_bytes = parse_der_tlv(val, 0x02)?;
@@ -340,6 +358,7 @@ pub fn extract_ordinal(cert_der: &[u8]) -> Option<u32> {
     Some(result)
 }
 
+/// Checks for the degraded-mode marker in a DER-encoded X.509 certificate.
 pub fn is_degraded(cert_der: &[u8]) -> bool {
     if let Some(val) = find_oid_extension(cert_der, &FLEETOS_DEGRADED_OID_BYTES) {
         if let Some(bool_bytes) = parse_der_tlv(val, 0x01) {
@@ -371,26 +390,38 @@ pub fn validate_svid(_cert_der: &[u8], _trust_bundle: &TrustBundle) -> Result<Sp
 pub struct DelegationId(pub [u8; 16]);
 
 /// A delegated signing key granted to a node for degraded-mode SVID renewal.
-/// Scoped to a specific (node, target_svid, ordinal) tuple.
+///
+/// SECURITY MODEL:
+/// `intermediate_cert_der` MUST be issued with standard RFC 5280 `NameConstraints`
+/// restricting the URI SAN to the specific trust domain. This provides a true
+/// structural backstop: any standards-compliant TLS library will reject SVIDs
+/// signed outside that trust domain, even if the agent is compromised.
+///
+/// Application-level checks (Target SVID, Ordinal) guard against bugs in
+/// `fleetos-control`'s delegation logic, but DO NOT structurally prevent a
+/// compromised agent from minting arbitrary SVIDs within the trust domain.
+/// The 4-hour TTL and `revoked_delegation_ids` broadcast are the primary
+/// defenses against this larger blast radius.
 pub struct DelegatedSigningKey {
     pub node_id: SpiffeId,           // The node this key was issued to
     pub target_svid_id: SpiffeId,    // The workload SVID this key is allowed to renew
     pub target_ordinal: Option<u32>, // The exact ordinal it can renew
     pub issued_at_unix: u64,
     pub expires_at_unix: u64,
+    pub signing_key: Zeroizing<Vec<u8>>, // DER-encoded Ed25519 private key
+    pub intermediate_cert_der: Vec<u8>,  // The constrained intermediate CA cert
 }
 
 impl DelegatedSigningKey {
     pub fn delegation_id(&self) -> DelegationId {
         let mut hasher = blake3::Hasher::new();
 
-        // Derive ID from node + target + ordinal + issued_at
         self.node_id.write_uri_bytes(&mut hasher);
         hasher.update(&[0x00]);
         self.target_svid_id.write_uri_bytes(&mut hasher);
         hasher.update(&[0x00]);
         if let Some(o) = self.target_ordinal {
-            hasher.update(&o.to_le_bytes());
+            hasher.update(&o.to_be_bytes()); // Aligned to to_be_bytes() convention
         }
         hasher.update(&[0x00]);
         hasher.update(&self.issued_at_unix.to_le_bytes());
@@ -436,7 +467,7 @@ pub mod ca {
         Err(SvidError::Unimplemented)
     }
 
-    /// Renews an SVID using a delegated key. Enforces strict scope and validity invariants.
+    /// Renews an SVID using a delegated key. Enforces application-level scope and validity invariants.
     pub fn sign_svid_delegated(
         key: &DelegatedSigningKey,
         existing_svid: &X509Svid,
@@ -448,7 +479,7 @@ pub mod ca {
             return Err(SvidError::DelegationKeyExpired);
         }
 
-        // 2. Target SVID Scoping
+        // 2. Target SVID Scoping (Application-level check)
         let svid_id = extract_spiffe_id(&existing_svid.cert_chain_der)?;
         if svid_id != key.target_svid_id {
             return Err(SvidError::TargetSvidMismatch);
