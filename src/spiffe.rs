@@ -10,21 +10,21 @@ use thiserror::Error;
 use tracing::warn;
 
 /// FleetOS IANA Private Enterprise Number (PEN).
-/// TODO (Project Manager): Replace `99999` with the official assigned PEN from IANA.
-pub const FLEETOS_IANA_PEN: u64 = 99999;
+pub const FLEETOS_IANA_PEN: u64 = 66561;
 
 // Custom OID Arcs under the FleetOS PEN
-pub const FLEETOS_ROLE_OID: &str = "1.3.6.1.4.1.99999.1.1";
-pub const FLEETOS_DEGRADED_OID: &str = "1.3.6.1.4.1.99999.1.2";
-pub const FLEETOS_ORDINAL_OID: &str = "1.3.6.1.4.1.99999.1.3";
+pub const FLEETOS_ROLE_OID: &str = "1.3.6.1.4.1.66561.1.1";
+pub const FLEETOS_DEGRADED_OID: &str = "1.3.6.1.4.1.66561.1.2";
+pub const FLEETOS_ORDINAL_OID: &str = "1.3.6.1.4.1.66561.1.3";
 
-// Raw DER OID bytes for `1.3.6.1.4.1.99999.1.*`
+// Raw DER OID bytes for `1.3.6.1.4.1.66561.1.*`
+// 66561 encodes to 0x84, 0x88, 0x01 in base-128 DER.
 const FLEETOS_ROLE_OID_BYTES: [u8; 10] =
-    [0x2B, 0x06, 0x01, 0x04, 0x01, 0x86, 0x8D, 0x1F, 0x01, 0x01];
+    [0x2B, 0x06, 0x01, 0x04, 0x01, 0x84, 0x88, 0x01, 0x01, 0x01];
 const FLEETOS_DEGRADED_OID_BYTES: [u8; 10] =
-    [0x2B, 0x06, 0x01, 0x04, 0x01, 0x86, 0x8D, 0x1F, 0x01, 0x02];
+    [0x2B, 0x06, 0x01, 0x04, 0x01, 0x84, 0x88, 0x01, 0x01, 0x02];
 const FLEETOS_ORDINAL_OID_BYTES: [u8; 10] =
-    [0x2B, 0x06, 0x01, 0x04, 0x01, 0x86, 0x8D, 0x1F, 0x01, 0x03];
+    [0x2B, 0x06, 0x01, 0x04, 0x01, 0x84, 0x88, 0x01, 0x01, 0x03];
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Error)]
 pub enum SvidError {
