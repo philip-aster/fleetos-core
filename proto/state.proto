@@ -6,7 +6,6 @@ import "identity.proto";
 
 // Pushes Service Authorization Graph (SAG) updates to nodes.
 service PolicyService {
-  // Streams SAG updates. Client sends its last known version.
   rpc WatchSag(WatchRequest) returns (stream SagUpdate);
 }
 
@@ -20,6 +19,11 @@ service RouterAssignmentService {
   rpc WatchRoutes(WatchRequest) returns (stream RouteUpdate);
 }
 
+// Unified stream for all cluster-wide, non-payload state changes.
+service WatchService {
+  rpc WatchEvents(WatchRequest) returns (stream WatchEvent);
+}
+
 message WatchRequest {
   uint64 last_known_version = 1;
 }
@@ -27,7 +31,7 @@ message WatchRequest {
 message SagUpdate {
   uint64 version = 1; // Matches Raft log index
   repeated SagRule rules = 2;
-  repeated bytes revoked_delegation_ids = 3; // Fast-cutoff defense-in-depth for degraded mode
+  // NOTE: revoked_delegation_ids moved to WatchEvent
 }
 
 message SagRule {
@@ -69,4 +73,35 @@ message RouteEntry {
   string destination_svid = 1;
   string destination_role = 2;
   string target_agent_svid = 3; // RouteHint
+}
+
+// Unified event stream for cluster state
+message WatchEvent {
+  oneof event {
+    TrustBundleRotation trust_bundle_rotation = 1;
+    ClusterMembership cluster_membership = 2;
+    SecretRotationNotification secret_rotation = 3;
+    RevokedDelegations revoked_delegations = 4; // Moved here from SagUpdate
+  }
+}
+
+message TrustBundleRotation {
+  uint64 version = 1;
+  // In production, this might just be a notification to fetch the new bundle via a unary RPC
+  // to keep the stream lightweight, or it could inline the roots depending on size.
+  repeated bytes roots_der = 2;
+}
+
+message ClusterMembership {
+  repeated string active_nodes = 1;
+  repeated string active_routers = 2;
+  repeated string active_gateways = 3;
+}
+
+message SecretRotationNotification {
+  string spiffe_id = 1;
+}
+
+message RevokedDelegations {
+  repeated bytes delegation_ids = 1;
 }

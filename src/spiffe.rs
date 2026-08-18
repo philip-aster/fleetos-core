@@ -7,7 +7,6 @@ use core::fmt;
 use core::str::FromStr;
 
 use thiserror::Error;
-// `tracing` is available because this module is gated behind `feature = "minimal"`
 use tracing::warn;
 
 /// FleetOS IANA Private Enterprise Number (PEN).
@@ -39,8 +38,8 @@ pub enum SvidError {
     Unimplemented,
     #[error("delegation key expired")]
     DelegationKeyExpired,
-    #[error("node ID mismatch")]
-    NodeIdMismatch,
+    #[error("target SVID mismatch")]
+    TargetSvidMismatch, // Renamed from NodeIdMismatch
     #[error("ordinal mismatch")]
     OrdinalMismatch,
     #[error("validity overrun")]
@@ -124,7 +123,6 @@ impl SpiffeId {
     }
 
     /// Writes the URI bytes directly to a hasher without allocating a String.
-    /// Format: `spiffe://<trust-domain>/ns/<tenant>/<kind>/<name>`
     pub fn write_uri_bytes(&self, hasher: &mut blake3::Hasher) {
         hasher.update(b"spiffe://");
         hasher.update(self.trust_domain.as_bytes());
@@ -190,13 +188,11 @@ impl FromStr for SpiffeId {
 }
 
 /// Workload role (e.g., primary, replica). Not part of the URI.
-/// Validates against embedded NUL bytes to protect domain-separated hashing.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct WorkloadRole(String);
 
 impl TryFrom<String> for WorkloadRole {
     type Error = RoleError;
-
     fn try_from(value: String) -> Result<Self, Self::Error> {
         if value.contains('\0') {
             return Err(RoleError::EmbeddedNul);
@@ -207,7 +203,6 @@ impl TryFrom<String> for WorkloadRole {
 
 impl TryFrom<&str> for WorkloadRole {
     type Error = RoleError;
-
     fn try_from(value: &str) -> Result<Self, Self::Error> {
         if value.contains('\0') {
             return Err(RoleError::EmbeddedNul);
@@ -230,21 +225,17 @@ impl fmt::Display for WorkloadRole {
 
 // --- DER Parsing Helpers ---
 
-/// Parses DER length starting at `bytes[0]`.
-/// Returns (length, num_bytes_consumed_for_length_encoding)
 fn parse_der_length(bytes: &[u8]) -> Option<(usize, usize)> {
     if bytes.is_empty() {
         return None;
     }
     let b = bytes[0];
     if b < 0x80 {
-        // Short form
         Some((b as usize, 1))
     } else {
-        // Long form
         let n = (b & 0x7f) as usize;
         if n == 0 || n > 4 || bytes.len() < 1 + n {
-            return None; // Indefinite length or too large, invalid or unsupported
+            return None;
         }
         let mut len = 0usize;
         for i in 1..=n {
@@ -254,7 +245,6 @@ fn parse_der_length(bytes: &[u8]) -> Option<(usize, usize)> {
     }
 }
 
-/// Parses a DER Tag-Length-Value structure and returns the value slice.
 fn parse_der_tlv<'a>(bytes: &'a [u8], expected_tag: u8) -> Option<&'a [u8]> {
     if bytes.is_empty() || bytes[0] != expected_tag {
         return None;
@@ -267,8 +257,6 @@ fn parse_der_tlv<'a>(bytes: &'a [u8], expected_tag: u8) -> Option<&'a [u8]> {
     Some(&bytes[val_start..val_start + len])
 }
 
-/// Scans DER for an OID and returns the inner OCTET STRING value slice.
-/// Properly skips the optional `critical` BOOLEAN and supports long-form lengths.
 fn find_oid_extension<'a>(cert_der: &'a [u8], oid: &[u8]) -> Option<&'a [u8]> {
     if cert_der.len() < oid.len() {
         return None;
@@ -301,53 +289,46 @@ fn find_oid_extension<'a>(cert_der: &'a [u8], oid: &[u8]) -> Option<&'a [u8]> {
 }
 
 /// Extracts the role from a DER-encoded X.509 certificate without full parsing.
-/// Emits a `warn` log if an extension is found but is corrupt/invalid.
 pub fn extract_role(cert_der: &[u8]) -> Option<WorkloadRole> {
-    // Case 1: No extension found (benign)
     let val = find_oid_extension(cert_der, &FLEETOS_ROLE_OID_BYTES)?;
 
-    // Value MUST be wrapped in a UTF8String (0x0C) or PrintableString (0x13)
     let string_bytes = match parse_der_tlv(val, 0x0C).or_else(|| parse_der_tlv(val, 0x13)) {
         Some(bytes) => bytes,
         None => {
             warn!(
                 target: "fleetos::spiffe::extract_role",
-                "Role extension present in SVID but missing required DER string tag (0x0C or 0x13). Possible corruption or tampering."
+                "Role extension present in SVID but missing required DER string tag (0x0C or 0x13)."
             );
             return None;
         }
     };
 
-    // Case 2: Extension present, but invalid UTF-8
     let role_str = match core::str::from_utf8(string_bytes) {
         Ok(s) => s,
         Err(_) => {
             warn!(
                 target: "fleetos::spiffe::extract_role",
-                "Role extension present in SVID but contains invalid UTF-8. Possible corruption or tampering."
+                "Role extension present in SVID but contains invalid UTF-8."
             );
             return None;
         }
     };
 
-    // Case 3: Extension present, but fails WorkloadRole validation (e.g. embedded NUL)
     match WorkloadRole::try_from(role_str) {
         Ok(role) => Some(role),
         Err(e) => {
             warn!(
                 target: "fleetos::spiffe::extract_role",
                 error = %e,
-                "Role extension present in SVID but failed validation. Possible corruption or tampering."
+                "Role extension present in SVID but failed validation."
             );
             None
         }
     }
 }
 
-/// Extracts the ordinal (replica instance) from a DER-encoded X.509 certificate.
 pub fn extract_ordinal(cert_der: &[u8]) -> Option<u32> {
     let val = find_oid_extension(cert_der, &FLEETOS_ORDINAL_OID_BYTES)?;
-    // Value is wrapped in an INTEGER (0x02)
     let int_bytes = parse_der_tlv(val, 0x02)?;
     if int_bytes.len() > 4 {
         return None;
@@ -359,10 +340,8 @@ pub fn extract_ordinal(cert_der: &[u8]) -> Option<u32> {
     Some(result)
 }
 
-/// Checks for the degraded-mode marker in a DER-encoded X.509 certificate.
 pub fn is_degraded(cert_der: &[u8]) -> bool {
     if let Some(val) = find_oid_extension(cert_der, &FLEETOS_DEGRADED_OID_BYTES) {
-        // BOOLEAN in DER is tag 0x01
         if let Some(bool_bytes) = parse_der_tlv(val, 0x01) {
             if !bool_bytes.is_empty() && bool_bytes[0] != 0 {
                 return true;
@@ -373,7 +352,6 @@ pub fn is_degraded(cert_der: &[u8]) -> bool {
 }
 
 pub fn extract_spiffe_id(_cert_der: &[u8]) -> Result<SpiffeId, SvidError> {
-    // Stub for actual SAN URI extraction to be implemented with rustls/x509-parser
     Err(SvidError::Unimplemented)
 }
 
@@ -393,18 +371,28 @@ pub fn validate_svid(_cert_der: &[u8], _trust_bundle: &TrustBundle) -> Result<Sp
 pub struct DelegationId(pub [u8; 16]);
 
 /// A delegated signing key granted to a node for degraded-mode SVID renewal.
+/// Scoped to a specific (node, target_svid, ordinal) tuple.
 pub struct DelegatedSigningKey {
-    pub node_id: SpiffeId,
+    pub node_id: SpiffeId,           // The node this key was issued to
+    pub target_svid_id: SpiffeId,    // The workload SVID this key is allowed to renew
+    pub target_ordinal: Option<u32>, // The exact ordinal it can renew
     pub issued_at_unix: u64,
     pub expires_at_unix: u64,
-    pub ordinal: Option<u32>,
 }
 
 impl DelegatedSigningKey {
     pub fn delegation_id(&self) -> DelegationId {
         let mut hasher = blake3::Hasher::new();
-        // Zero-allocation hashing for delegation id
+
+        // Derive ID from node + target + ordinal + issued_at
         self.node_id.write_uri_bytes(&mut hasher);
+        hasher.update(&[0x00]);
+        self.target_svid_id.write_uri_bytes(&mut hasher);
+        hasher.update(&[0x00]);
+        if let Some(o) = self.target_ordinal {
+            hasher.update(&o.to_le_bytes());
+        }
+        hasher.update(&[0x00]);
         hasher.update(&self.issued_at_unix.to_le_bytes());
 
         let mut id_bytes = [0u8; 16];
@@ -460,15 +448,15 @@ pub mod ca {
             return Err(SvidError::DelegationKeyExpired);
         }
 
-        // 2. Node Scoping
+        // 2. Target SVID Scoping
         let svid_id = extract_spiffe_id(&existing_svid.cert_chain_der)?;
-        if svid_id != key.node_id {
-            return Err(SvidError::NodeIdMismatch);
+        if svid_id != key.target_svid_id {
+            return Err(SvidError::TargetSvidMismatch);
         }
 
         // 3. Ordinal Scoping
         let svid_ordinal = extract_ordinal(&existing_svid.cert_chain_der);
-        if svid_ordinal != key.ordinal {
+        if svid_ordinal != key.target_ordinal {
             return Err(SvidError::OrdinalMismatch);
         }
 
