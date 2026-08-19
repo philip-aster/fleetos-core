@@ -1,6 +1,6 @@
 syntax = "proto3";
 
-package fleetos.identity;
+package fleetos;
 
 // The Attestation Service handles verifying hardware quotes and join tokens.
 service AttestationService {

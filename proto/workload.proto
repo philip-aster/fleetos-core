@@ -1,6 +1,6 @@
 syntax = "proto3";
 
-package fleetos.workload;
+package fleetos;
 
 message WorkloadSpec {
   string tenant_id = 1;

@@ -1,42 +1,19 @@
 syntax = "proto3";
+package fleetos;
 
-package fleetos.admin;
+import "workload.proto";
 
 service AdminService {
   rpc CreateTenant(CreateTenantRequest) returns (CreateTenantResponse);
-  rpc SubmitWorkloadSpec(WorkloadSpec) returns (WorkloadSpecAck);
+  rpc SubmitWorkloadSpec(WorkloadSpec) returns (WorkloadSpecAck); // This now resolves correctly
   rpc ListNodes(ListNodesRequest) returns (ListNodesResponse);
   rpc GetClusterStatus(GetClusterStatusRequest) returns (ClusterStatus);
 }
 
-message CreateTenantRequest {
-  string tenant_id = 1;
-}
-
-message CreateTenantResponse {
-  bool success = 1;
-}
-
-message WorkloadSpec {
-  string tenant_id = 1;
-  string workload_id = 2;
-  string image = 3;
-  uint32 replicas = 4;
-}
-
-message WorkloadSpecAck {
-  bool accepted = 1;
-}
-
+message CreateTenantRequest { string tenant_id = 1; }
+message CreateTenantResponse { bool success = 1; }
+message WorkloadSpecAck { bool accepted = 1; }
 message ListNodesRequest {}
-
-message ListNodesResponse {
-  repeated string node_svids = 1;
-}
-
+message ListNodesResponse { repeated string node_svids = 1; }
 message GetClusterStatusRequest {}
-
-message ClusterStatus {
-  uint64 raft_term = 1;
-  uint32 healthy_nodes = 2;
-}
+message ClusterStatus { uint64 raft_term = 1; uint32 healthy_nodes = 2; }

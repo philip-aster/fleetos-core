@@ -1,6 +1,6 @@
 syntax = "proto3";
 
-package fleetos.provisioning;
+package fleetos;
 
 service ProvisioningService {
   rpc ReconcileNodePool(NodePoolSpec) returns (NodePoolStatus);

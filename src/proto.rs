@@ -1,6 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 //! Tonic-generated proto code and wire framing.
 
+/// Includes the generated protobuf code.
+pub mod fleetos {
+    tonic::include_proto!("fleetos");
+}
+
+// Re-export the types so callers don't have to type `proto::fleetos::...`
+pub use fleetos::*;
+
 /// Out-of-band identity header prefixing gRPC frames.
 /// 4-byte length + identity header + gRPC frame.
 pub mod identity_header {

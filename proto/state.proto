@@ -1,8 +1,5 @@
 syntax = "proto3";
-
-package fleetos.state;
-
-import "identity.proto";
+package fleetos;
 
 // Pushes Service Authorization Graph (SAG) updates to nodes.
 service PolicyService {
@@ -19,7 +16,7 @@ service RouterAssignmentService {
   rpc WatchRoutes(WatchRequest) returns (stream RouteUpdate);
 }
 
-// Unified stream for all cluster-wide, non-payload state changes.
+// Broadcasts lightweight rotation notifications to agents.
 service WatchService {
   rpc WatchEvents(WatchRequest) returns (stream WatchEvent);
 }
@@ -29,13 +26,13 @@ message WatchRequest {
 }
 
 message SagUpdate {
-  uint64 version = 1; // Matches Raft log index
+  uint64 version = 1;
   repeated SagRule rules = 2;
-  // NOTE: revoked_delegation_ids moved to WatchEvent
+  repeated bytes revoked_delegation_ids = 3;
 }
 
 message SagRule {
-  string id = 1; // 16-byte hex string
+  string id = 1;
   PeerSelector from = 2;
   PeerSelector to = 3;
   enum Action {
@@ -48,8 +45,8 @@ message SagRule {
 message PeerSelector {
   string tenant = 1;
   string service_name = 2;
-  string role = 3; // Empty if not applicable
-  optional uint32 port = 4; // proto3 optional ensures None vs Some(0) survives the wire
+  string role = 3;
+  optional uint32 port = 4;
 }
 
 message ScheduleUpdate {
@@ -59,7 +56,7 @@ message ScheduleUpdate {
 
 message WorkloadAssignment {
   string workload_id = 1;
-  string runtime = 2; // "containerd" or "cloud-hypervisor"
+  string runtime = 2;
   string image = 3;
   string role = 4;
 }
@@ -72,36 +69,15 @@ message RouteUpdate {
 message RouteEntry {
   string destination_svid = 1;
   string destination_role = 2;
-  string target_agent_svid = 3; // RouteHint
+  string target_agent_svid = 3;
 }
 
-// Unified event stream for cluster state
 message WatchEvent {
   oneof event {
-    TrustBundleRotation trust_bundle_rotation = 1;
-    ClusterMembership cluster_membership = 2;
-    SecretRotationNotification secret_rotation = 3;
-    RevokedDelegations revoked_delegations = 4; // Moved here from SagUpdate
+    SecretRotationNotification secret_rotation = 1;
   }
-}
-
-message TrustBundleRotation {
-  uint64 version = 1;
-  // In production, this might just be a notification to fetch the new bundle via a unary RPC
-  // to keep the stream lightweight, or it could inline the roots depending on size.
-  repeated bytes roots_der = 2;
-}
-
-message ClusterMembership {
-  repeated string active_nodes = 1;
-  repeated string active_routers = 2;
-  repeated string active_gateways = 3;
 }
 
 message SecretRotationNotification {
   string spiffe_id = 1;
-}
-
-message RevokedDelegations {
-  repeated bytes delegation_ids = 1;
 }
