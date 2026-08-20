@@ -6,6 +6,7 @@ use core::convert::TryFrom;
 use core::fmt;
 use core::str::FromStr;
 // Re-export Zeroizing so the struct definition above compiles cleanly
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tracing::warn;
 use zeroize::Zeroizing;
@@ -53,7 +54,7 @@ pub enum RoleError {
     EmbeddedNul,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum IdKind {
     Sa,
     Node,
@@ -193,9 +194,29 @@ impl FromStr for SpiffeId {
     }
 }
 
+// Custom Serde implementation to serialize SpiffeId as a flat string
+impl Serialize for SpiffeId {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(&self.to_string())
+    }
+}
+
+impl<'de> Deserialize<'de> for SpiffeId {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        SpiffeId::from_str(&s).map_err(serde::de::Error::custom)
+    }
+}
+
 /// Workload role (e.g., primary, replica). Not part of the URI.
 /// Validates against embedded NUL bytes to protect domain-separated hashing.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct WorkloadRole(String);
 
 impl TryFrom<String> for WorkloadRole {
@@ -227,6 +248,44 @@ impl WorkloadRole {
 }
 
 impl fmt::Display for WorkloadRole {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+/// Unique identifier for a workload instance (post-expansion).
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct WorkloadId(String);
+
+impl WorkloadId {
+    pub fn new(id: impl Into<String>) -> Self {
+        Self(id.into())
+    }
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Display for WorkloadId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+/// Unique identifier for a pod instance (post-expansion).
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct PodId(String);
+
+impl PodId {
+    pub fn new(id: impl Into<String>) -> Self {
+        Self(id.into())
+    }
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Display for PodId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.0)
     }

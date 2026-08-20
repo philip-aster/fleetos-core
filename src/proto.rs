@@ -6,8 +6,55 @@ pub mod fleetos {
     tonic::include_proto!("fleetos");
 }
 
-// Re-export the types so callers don't have to type `proto::fleetos::...`
-pub use fleetos::*;
+// Re-export the types into their logical modules to match the original .proto file structure.
+pub mod admin {
+    pub use crate::proto::fleetos::admin_service_server::AdminService;
+    pub use crate::proto::fleetos::{
+        ClusterStatus, CreateTenantRequest, CreateTenantResponse, GetClusterStatusRequest,
+        ListNodesRequest, ListNodesResponse, WorkloadSpecAck,
+    };
+}
+
+pub mod identity {
+    pub use crate::proto::fleetos::attestation_service_server::AttestationService;
+    pub use crate::proto::fleetos::ca_service_server::CaService;
+    pub use crate::proto::fleetos::{
+        AttestationQuote, AttestedIdentity, CsrRequest, NonceRequest, NonceResponse, QuoteType,
+        SvidResponse, TrustBundle, TrustBundleRequest,
+    };
+}
+
+pub mod secret {
+    pub use crate::proto::fleetos::secret_service_server::SecretService;
+    pub use crate::proto::fleetos::{FetchSecretRequest, SealedSecret};
+}
+
+pub mod state {
+    pub use crate::proto::fleetos::policy_service_server::PolicyService;
+    pub use crate::proto::fleetos::router_assignment_service_server::RouterAssignmentService;
+    pub use crate::proto::fleetos::scheduler_service_server::SchedulerService;
+    pub use crate::proto::fleetos::watch_service_server::WatchService;
+    pub use crate::proto::fleetos::{
+        PeerSelector, RouteEntry, RouteUpdate, SagRule, SagUpdate, ScheduleUpdate,
+        SecretRotationNotification, WatchEvent, WatchRequest, WorkloadAssignment,
+    };
+}
+
+pub mod provisioning {
+    pub use crate::proto::fleetos::provisioning_service_server::ProvisioningService;
+    pub use crate::proto::fleetos::{
+        Empty, NodeKind, NodeLifecycleState, NodePoolId, NodePoolSpec, NodePoolStatus,
+        ProvisionedNode, ResourceSpec,
+    };
+}
+
+pub mod workload {
+    pub use crate::proto::fleetos::{
+        ContainerPort, EnvVar, ExecCheck, HttpGetCheck, PodSpec, Probe, ProbeSet,
+        ResourceRequirements, RestartPolicy, TcpSocketCheck, TerminationSpec, VolumeMount,
+        WorkloadSpec,
+    };
+}
 
 /// Out-of-band identity header prefixing gRPC frames.
 /// 4-byte length + identity header + gRPC frame.

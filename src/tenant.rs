@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // src/tenant.rs
 use core::fmt;
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct TenantId(String);
 
 impl TenantId {
