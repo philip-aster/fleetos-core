@@ -9,6 +9,7 @@ service AdminService {
   rpc ListNodes(ListNodesRequest) returns (ListNodesResponse);
   rpc GetClusterStatus(GetClusterStatusRequest) returns (ClusterStatus);
   rpc GenerateJoinToken(GenerateJoinTokenRequest) returns (GenerateJoinTokenResponse);
+  rpc SubmitCronWorkload(CronWorkload) returns (CronWorkloadAck);
 }
 
 message CreateTenantRequest {
@@ -36,12 +37,14 @@ message ClusterStatus {
   uint32 healthy_nodes = 2;
 }
 
-// NEW
 message GenerateJoinTokenRequest {
   string node_kind = 1; // e.g., "agent", "router", "gateway", "control"
 }
 
-// NEW
 message GenerateJoinTokenResponse {
   bytes token = 1; // 32-byte cryptographically random token
+}
+
+message CronWorkloadAck {
+  bool accepted = 1;
 }

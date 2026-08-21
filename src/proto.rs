@@ -10,9 +10,9 @@ pub mod fleetos {
 pub mod admin {
     pub use crate::proto::fleetos::admin_service_server::AdminService;
     pub use crate::proto::fleetos::{
-        ClusterStatus, CreateTenantRequest, CreateTenantResponse, GenerateJoinTokenRequest,
-        GenerateJoinTokenResponse, GetClusterStatusRequest, ListNodesRequest, ListNodesResponse,
-        WorkloadSpecAck,
+        ClusterStatus, CreateTenantRequest, CreateTenantResponse, CronWorkloadAck,
+        GenerateJoinTokenRequest, GenerateJoinTokenResponse, GetClusterStatusRequest,
+        ListNodesRequest, ListNodesResponse, WorkloadSpecAck,
     };
 }
 
@@ -51,9 +51,10 @@ pub mod provisioning {
 
 pub mod workload {
     pub use crate::proto::fleetos::{
-        ContainerPort, EnvVar, ExecCheck, HttpGetCheck, PlacementMode, PodSpec, Probe, ProbeSet,
-        ReplaceStrategy, ResourceRequirements, RestartPolicy, RollingReplaceStrategy,
-        TcpSocketCheck, TerminationSpec, UpdateStrategy, VolumeMount, WorkloadSpec,
+        ContainerPort, CronSchedule, CronWorkload, EnvVar, ExecCheck, HttpGetCheck, PlacementMode,
+        PodSpec, Probe, ProbeSet, ReplaceStrategy, ResourceRequirements, RestartPolicy,
+        RollingReplaceStrategy, TcpSocketCheck, TerminationSpec, UpdateStrategy, VolumeMount,
+        WorkloadSpec,
     };
 }
 

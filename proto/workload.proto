@@ -121,3 +121,17 @@ message HttpGetCheck {
 message TcpSocketCheck {
   uint32 port = 1;
 }
+
+// --- Cron Workloads ---
+
+message CronSchedule {
+  string expression = 1; // Standard 5-field cron (e.g., "0 * * * *")
+  bool suspend = 2;
+}
+
+message CronWorkload {
+  string tenant_id = 1;
+  string cron_workload_id = 2;
+  CronSchedule schedule = 3;
+  WorkloadSpec workload_template = 4; // Instantiated on each trigger
+}
