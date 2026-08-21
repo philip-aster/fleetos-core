@@ -42,6 +42,7 @@ pub mod state {
 }
 
 pub mod provisioning {
+    pub use crate::proto::fleetos::provisioning_service_client::ProvisioningServiceClient;
     pub use crate::proto::fleetos::provisioning_service_server::ProvisioningService;
     pub use crate::proto::fleetos::{
         Empty, NodeKind, NodeLifecycleState, NodePoolId, NodePoolSpec, NodePoolStatus,
