@@ -8,7 +8,7 @@ service AdminService {
   rpc SubmitWorkloadSpec(WorkloadSpec) returns (WorkloadSpecAck);
   rpc ListNodes(ListNodesRequest) returns (ListNodesResponse);
   rpc GetClusterStatus(GetClusterStatusRequest) returns (ClusterStatus);
-  rpc GenerateJoinToken(GenerateJoinTokenRequest) returns (GenerateJoinTokenResponse); // NEW
+  rpc GenerateJoinToken(GenerateJoinTokenRequest) returns (GenerateJoinTokenResponse);
 }
 
 message CreateTenantRequest {
