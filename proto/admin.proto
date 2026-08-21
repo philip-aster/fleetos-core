@@ -5,15 +5,43 @@ import "workload.proto";
 
 service AdminService {
   rpc CreateTenant(CreateTenantRequest) returns (CreateTenantResponse);
-  rpc SubmitWorkloadSpec(WorkloadSpec) returns (WorkloadSpecAck); // This now resolves correctly
+  rpc SubmitWorkloadSpec(WorkloadSpec) returns (WorkloadSpecAck);
   rpc ListNodes(ListNodesRequest) returns (ListNodesResponse);
   rpc GetClusterStatus(GetClusterStatusRequest) returns (ClusterStatus);
+  rpc GenerateJoinToken(GenerateJoinTokenRequest) returns (GenerateJoinTokenResponse); // NEW
 }
 
-message CreateTenantRequest { string tenant_id = 1; }
-message CreateTenantResponse { bool success = 1; }
-message WorkloadSpecAck { bool accepted = 1; }
+message CreateTenantRequest {
+  string tenant_id = 1;
+}
+
+message CreateTenantResponse {
+  bool success = 1;
+}
+
+message WorkloadSpecAck {
+  bool accepted = 1;
+}
+
 message ListNodesRequest {}
-message ListNodesResponse { repeated string node_svids = 1; }
+
+message ListNodesResponse {
+  repeated string node_svids = 1;
+}
+
 message GetClusterStatusRequest {}
-message ClusterStatus { uint64 raft_term = 1; uint32 healthy_nodes = 2; }
+
+message ClusterStatus {
+  uint64 raft_term = 1;
+  uint32 healthy_nodes = 2;
+}
+
+// NEW
+message GenerateJoinTokenRequest {
+  string node_kind = 1; // e.g., "agent", "router", "gateway", "control"
+}
+
+// NEW
+message GenerateJoinTokenResponse {
+  bytes token = 1; // 32-byte cryptographically random token
+}

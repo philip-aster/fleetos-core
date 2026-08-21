@@ -10,8 +10,9 @@ pub mod fleetos {
 pub mod admin {
     pub use crate::proto::fleetos::admin_service_server::AdminService;
     pub use crate::proto::fleetos::{
-        ClusterStatus, CreateTenantRequest, CreateTenantResponse, GetClusterStatusRequest,
-        ListNodesRequest, ListNodesResponse, WorkloadSpecAck,
+        ClusterStatus, CreateTenantRequest, CreateTenantResponse, GenerateJoinTokenRequest,
+        GenerateJoinTokenResponse, GetClusterStatusRequest, ListNodesRequest, ListNodesResponse,
+        WorkloadSpecAck,
     };
 }
 
