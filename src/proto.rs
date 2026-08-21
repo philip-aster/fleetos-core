@@ -51,9 +51,9 @@ pub mod provisioning {
 
 pub mod workload {
     pub use crate::proto::fleetos::{
-        ContainerPort, EnvVar, ExecCheck, HttpGetCheck, PodSpec, Probe, ProbeSet,
-        ResourceRequirements, RestartPolicy, TcpSocketCheck, TerminationSpec, VolumeMount,
-        WorkloadSpec,
+        ContainerPort, EnvVar, ExecCheck, HttpGetCheck, PlacementMode, PodSpec, Probe, ProbeSet,
+        ReplaceStrategy, ResourceRequirements, RestartPolicy, RollingReplaceStrategy,
+        TcpSocketCheck, TerminationSpec, UpdateStrategy, VolumeMount, WorkloadSpec,
     };
 }
 

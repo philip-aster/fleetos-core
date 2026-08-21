@@ -1,5 +1,4 @@
 syntax = "proto3";
-
 package fleetos;
 
 message WorkloadSpec {
@@ -10,6 +9,29 @@ message WorkloadSpec {
   // The scheduler expands this into individual PodSpecs.
   map<string, uint32> replicas = 4;
   PodSpec pod_spec = 5;
+  PlacementMode placement = 6;       // NEW
+  UpdateStrategy update_strategy = 7; // NEW
+}
+
+enum PlacementMode {
+  REPLICA_COUNT = 0;
+  ONE_PER_NODE = 1;
+}
+
+message UpdateStrategy {
+  oneof strategy {
+    ReplaceStrategy replace = 1;
+    RollingReplaceStrategy rolling_replace = 2;
+  }
+}
+
+message ReplaceStrategy {
+  uint32 max_unavailable = 1;
+}
+
+message RollingReplaceStrategy {
+  uint32 max_surge = 1;
+  uint32 max_unavailable = 2;
 }
 
 message PodSpec {
@@ -71,7 +93,7 @@ message EnvVar {
 message ProbeSet {
   Probe liveness = 1;
   Probe readiness = 2;
-  Probe startup = 3; // Gates when liveness/readiness begin
+  Probe startup = 3;
 }
 
 message Probe {
@@ -84,7 +106,7 @@ message Probe {
   uint32 period_seconds = 5;
   uint32 timeout_seconds = 6;
   uint32 success_threshold = 7;
-  uint32 failure_threshold = 8; // Fixed field collision
+  uint32 failure_threshold = 8;
 }
 
 message ExecCheck {
