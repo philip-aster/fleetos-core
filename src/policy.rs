@@ -8,15 +8,15 @@ use crate::version::MonotonicVersion;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ServicePattern {
-    tenant: TenantId,
-    name: String,
+    pub tenant: TenantId, // Made public
+    pub name: String,     // Made public
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct PeerSelector {
     pub service: ServicePattern,
     pub role: Option<WorkloadRole>,
-    pub port: Option<u16>,
+    pub port: Option<u16>, // None = wildcard tier, Some = exact tier
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -44,7 +44,7 @@ impl SagRuleId {
         hasher.update(from_service.as_bytes());
         hasher.update(&[0x00]); // separator
         if let Some(r) = from_role {
-            hasher.update(r.as_str().as_bytes()); // Updated to use as_str()
+            hasher.update(r.as_str().as_bytes());
         }
         hasher.update(&[0x00]); // separator
         if let Some(p) = from_port {
@@ -55,7 +55,7 @@ impl SagRuleId {
         hasher.update(to_service.as_bytes());
         hasher.update(&[0x00]); // separator
         if let Some(r) = to_role {
-            hasher.update(r.as_str().as_bytes()); // Updated to use as_str()
+            hasher.update(r.as_str().as_bytes());
         }
         hasher.update(&[0x00]); // separator
         if let Some(p) = to_port {
