@@ -2,15 +2,43 @@ syntax = "proto3";
 package fleetos;
 
 import "workload.proto";
+import "state.proto"; // CR-2: reuse SagRule/PeerSelector — never redefine.
 
 service AdminService {
+  // --- Existing surface (unchanged) ---
   rpc CreateTenant(CreateTenantRequest) returns (CreateTenantResponse);
   rpc SubmitWorkloadSpec(WorkloadSpec) returns (WorkloadSpecAck);
   rpc ListNodes(ListNodesRequest) returns (ListNodesResponse);
   rpc GetClusterStatus(GetClusterStatusRequest) returns (ClusterStatus);
   rpc GenerateJoinToken(GenerateJoinTokenRequest) returns (GenerateJoinTokenResponse);
   rpc SubmitCronWorkload(CronWorkload) returns (CronWorkloadAck);
+
+  // --- CR-2: SAG administration ---
+  rpc UpsertSagRule(UpsertSagRuleRequest) returns (SagRuleAck);
+  rpc DeleteSagRule(DeleteSagRuleRequest) returns (SagRuleAck);
+
+  // --- CR-2: secret store ---
+  rpc StoreSecret(StoreSecretRequest) returns (SecretAck);
+  rpc GrantSecretAccess(SecretAclChange) returns (SecretAck);
+  rpc RevokeSecretAccess(SecretAclChange) returns (SecretAck);
+
+  // --- CR-2: degraded-mode delegated signing ---
+  rpc RequestDelegatedKey(DelegatedKeyRequest) returns (DelegatedKeyResponse);
+
+  // --- CR-2: workload lifecycle ---
+  rpc DeleteWorkload(DeleteWorkloadRequest) returns (WorkloadSpecAck);
+  rpc ScaleWorkload(ScaleWorkloadRequest) returns (WorkloadSpecAck);
+
+  // --- CR-2: node administration ---
+  rpc CordonNode(NodeId) returns (NodeAck);
+  rpc EvictNode(NodeId) returns (NodeAck); // admin-initiated; distinct from lease eviction
+
+  // --- CR-2 / CR-7: tenant quotas ---
+  rpc SetQuota(QuotaRequest) returns (QuotaAck);
+  rpc GetQuota(QuotaRequest) returns (QuotaResponse);
 }
+
+// ================= Existing messages (unchanged) =================
 
 message CreateTenantRequest {
   string tenant_id = 1;
@@ -47,4 +75,101 @@ message GenerateJoinTokenResponse {
 
 message CronWorkloadAck {
   bool accepted = 1;
+}
+
+// ================= CR-2: SAG administration =================
+
+message UpsertSagRuleRequest {
+  // Rule to insert or replace. The canonical rule id is recomputed
+  // server-side from rule content (SagRuleId::of_rule); any caller-supplied
+  // id is advisory.
+  SagRule rule = 1;
+}
+
+message DeleteSagRuleRequest {
+  string rule_id = 1; // canonical id as returned by UpsertSagRule
+}
+
+message SagRuleAck {
+  bool accepted = 1;
+  string rule_id = 2; // canonical deterministic id of the affected rule
+}
+
+// ================= CR-2: secret store =================
+
+message StoreSecretRequest {
+  string tenant_id = 1; // scoping for management/listing; see addendum note
+  string key = 2;
+  bytes value = 3;
+  repeated string authorized_spiffe_ids = 4;
+}
+
+message SecretAck {
+  bool accepted = 1;
+}
+
+message SecretAclChange {
+  string tenant_id = 1;
+  string key = 2;
+  string spiffe_id = 3;
+}
+
+// ================= CR-2: delegated signing =================
+
+message DelegatedKeyRequest {
+  string node_svid = 1;
+  string target_spiffe_id = 2;
+  optional uint32 target_ordinal = 3; // absent = role-level renewal scope
+  uint64 requested_ttl_secs = 4;      // upper bound; control may grant less
+}
+
+message DelegatedKeyResponse {
+  bytes delegation_id = 1;  // 16-byte DelegationId
+  bytes key_material = 2;   // opaque; control's postcard shadow-struct format
+  uint64 expires_at_unix = 3;
+}
+
+// ================= CR-2: workload lifecycle =================
+
+message DeleteWorkloadRequest {
+  string tenant_id = 1;
+  string workload_id = 2;
+}
+
+message ScaleWorkloadRequest {
+  string tenant_id = 1;
+  string workload_id = 2;
+  map<string, uint32> replicas = 3; // per-role desired counts; same shape as WorkloadSpec.replicas
+}
+
+// ================= CR-2: node administration =================
+
+message NodeId {
+  string node_svid = 1;
+}
+
+message NodeAck {
+  bool accepted = 1;
+}
+
+// ================= CR-7: tenant quotas =================
+
+message TenantQuota {
+  string tenant_id = 1;
+  uint64 max_cpu_millicores = 2;
+  uint64 max_memory_bytes = 3;
+  uint32 max_workloads = 4;
+}
+
+message QuotaRequest {
+  // SetQuota: the full quota is applied. GetQuota: only quota.tenant_id is read.
+  TenantQuota quota = 1;
+}
+
+message QuotaAck {
+  bool accepted = 1;
+}
+
+message QuotaResponse {
+  TenantQuota quota = 1;
 }

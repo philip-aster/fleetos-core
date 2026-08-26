@@ -15,6 +15,31 @@ use zeroize::Zeroizing;
 pub enum CryptoError {
     #[error("decryption failed")]
     DecryptionFailed,
+    #[error("invalid public key length")]
+    InvalidPublicKeyLength,
+}
+
+impl RecipientX25519Pubkey {
+    /// Parses a 32-byte X25519 pubkey, e.g. from proto
+    /// `AttestationQuote.agent_x25519_pubkey` at submit_quote time.
+    pub fn from_slice(slice: &[u8]) -> Result<Self, CryptoError> {
+        let bytes: [u8; 32] = slice
+            .try_into()
+            .map_err(|_| CryptoError::InvalidPublicKeyLength)?;
+        Ok(Self(bytes))
+    }
+}
+
+/// CR-1: generate the node's static X25519 sealing keypair. Called once
+/// pre-attestation during join; the node persists the private half and
+/// presents the public half in `AttestationQuote.agent_x25519_pubkey`.
+pub fn generate_sealing_keypair() -> (Zeroizing<[u8; 32]>, RecipientX25519Pubkey) {
+    let secret = StaticSecret::random();
+    let public = PublicKey::from(&secret);
+    (
+        Zeroizing::new(secret.to_bytes()),
+        RecipientX25519Pubkey(public.to_bytes()),
+    )
 }
 
 /// Monotonically increasing counter per SVID to prevent replay attacks.

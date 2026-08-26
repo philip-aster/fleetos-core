@@ -21,6 +21,12 @@ service WatchService {
   rpc WatchEvents(WatchRequest) returns (stream WatchEvent);
 }
 
+// CR-4 (G-10): agents push workload liveness/readiness so control's pod
+// controller has a death signal other than missing placements.
+service WorkloadStatusService {
+  rpc ReportWorkloadStatus(WorkloadStatusReport) returns (StatusAck);
+}
+
 message WatchRequest {
   uint64 last_known_version = 1;
 }
@@ -29,6 +35,11 @@ message SagUpdate {
   uint64 version = 1;
   repeated SagRule rules = 2;
   repeated bytes revoked_delegation_ids = 3;
+  // CR-5: currently-revoked SVIDs (NOT historical). Peers MUST reject peer
+  // certificates whose SPIFFE URI SAN appears in this set during mTLS.
+  // Control prunes entries once past the revoked SVID's TTL so the set
+  // stays bounded.
+  repeated string revoked_spiffe_ids = 4;
 }
 
 message SagRule {
@@ -70,6 +81,11 @@ message RouteEntry {
   string destination_svid = 1;
   string destination_role = 2;
   string target_agent_svid = 3;
+  // CR-3: allocated dummy service address in canonical IPv4 value form
+  // (240.0.0.45 -> 0xF000002D). 0 = none. Canonical on-wire bytes for eBPF
+  // map keys are big-endian (network order): to_be_bytes() of this value;
+  // consumers convert via HostOrderIpv4::from_network() at map-insertion time.
+  uint32 dummy_ip = 4;
 }
 
 message WatchEvent {
@@ -80,4 +96,17 @@ message WatchEvent {
 
 message SecretRotationNotification {
   string spiffe_id = 1;
+}
+
+message WorkloadStatusReport {
+  string pod_id = 1;      // scheduler-assigned, unique post-expansion
+  string workload_id = 2;
+  string tenant_id = 3;
+  bool ready = 4;         // readiness probe passing
+  bool live = 5;          // liveness probe passing
+  uint64 observed_at_unix = 6;
+}
+
+message StatusAck {
+  bool accepted = 1;
 }

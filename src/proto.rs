@@ -6,13 +6,15 @@ pub mod fleetos {
     tonic::include_proto!("fleetos");
 }
 
-// Re-export the types into their logical modules to match the original .proto file structure.
 pub mod admin {
     pub use crate::proto::fleetos::admin_service_server::AdminService;
     pub use crate::proto::fleetos::{
         ClusterStatus, CreateTenantRequest, CreateTenantResponse, CronWorkloadAck,
+        DelegatedKeyRequest, DelegatedKeyResponse, DeleteSagRuleRequest, DeleteWorkloadRequest,
         GenerateJoinTokenRequest, GenerateJoinTokenResponse, GetClusterStatusRequest,
-        ListNodesRequest, ListNodesResponse, WorkloadSpecAck,
+        ListNodesRequest, ListNodesResponse, NodeAck, NodeId, QuotaAck, QuotaRequest,
+        QuotaResponse, SagRuleAck, ScaleWorkloadRequest, SecretAck, SecretAclChange,
+        StoreSecretRequest, TenantQuota, UpsertSagRuleRequest, WorkloadSpecAck,
     };
 }
 
@@ -35,9 +37,14 @@ pub mod state {
     pub use crate::proto::fleetos::router_assignment_service_server::RouterAssignmentService;
     pub use crate::proto::fleetos::scheduler_service_server::SchedulerService;
     pub use crate::proto::fleetos::watch_service_server::WatchService;
+    // CR-4: client exported too — fleetos-agent is the client-side consumer
+    // (precedent: provisioning module).
+    pub use crate::proto::fleetos::workload_status_service_client::WorkloadStatusServiceClient;
+    pub use crate::proto::fleetos::workload_status_service_server::WorkloadStatusService;
     pub use crate::proto::fleetos::{
         PeerSelector, RouteEntry, RouteUpdate, SagRule, SagUpdate, ScheduleUpdate,
-        SecretRotationNotification, WatchEvent, WatchRequest, WorkloadAssignment,
+        SecretRotationNotification, StatusAck, WatchEvent, WatchRequest, WorkloadAssignment,
+        WorkloadStatusReport,
     };
 }
 

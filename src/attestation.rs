@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //! Hardware-rooted attestation traits and types.
 
+use crate::crypto::RecipientX25519Pubkey;
 use crate::nonce::Nonce;
 use crate::spiffe::SpiffeId;
 use async_trait::async_trait;
@@ -39,6 +40,15 @@ pub struct AttestationQuote {
     pub raw_signature: Vec<u8>,
     /// Required for initial cluster join. None during SVID rotation.
     pub join_token: Option<JoinToken>,
+    /// CR-1: node's X25519 sealing pubkey, generated pre-attestation.
+    /// Control registers it at submit_quote time keyed by the attested
+    /// SPIFFE ID; it is the sealing target for `crate::crypto::seal` /
+    /// SecretService::FetchSecret.
+    ///
+    /// SECURITY: claimed field — not covered by the hardware quote signature.
+    /// Binding to the attested identity is only as strong as quote
+    /// verification. Secret delivery must not go live until control's
+    pub agent_x25519_pubkey: RecipientX25519Pubkey,
 }
 
 /// PCR policy mapping. PCRs included depend on backend.
