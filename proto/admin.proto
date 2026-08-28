@@ -41,6 +41,9 @@ service AdminService {
   rpc GrantOperatorAccess(GrantOperatorAccessRequest) returns (OperatorAccessAck);
   rpc RevokeOperatorAccess(RevokeOperatorAccessRequest) returns (OperatorAccessAck);
   rpc ListOperatorAccess(ListOperatorAccessRequest) returns (ListOperatorAccessResponse);
+
+  // --- CR-9: replicated audit log ---
+  rpc ListAuditLog(ListAuditLogRequest) returns (ListAuditLogResponse);
 }
 
 message CreateTenantRequest {
@@ -223,4 +226,26 @@ message ListOperatorAccessResponse {
 message OperatorAccessAck {
   bool accepted = 1;
   string grant_id = 2; // empty when accepted == false
+}
+
+// ================= CR-9: replicated audit log =================
+
+message ListAuditLogRequest {
+  // inclusive lower bound, 0 = start
+  uint64 from_version = 1;
+  // 0 = default cap (e.g. 1000)
+  uint64 max_entries = 2;
+}
+
+message AuditEntry {
+  uint64 version = 1;
+  string request_id = 2;
+  string actor = 3;
+  string action = 4;
+  string target = 5;
+  int64 timestamp_unix = 6;
+}
+
+message ListAuditLogResponse {
+  repeated AuditEntry entries = 1;
 }

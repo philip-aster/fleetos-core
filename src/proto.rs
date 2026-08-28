@@ -9,14 +9,14 @@ pub mod fleetos {
 pub mod admin {
     pub use crate::proto::fleetos::admin_service_server::AdminService;
     pub use crate::proto::fleetos::{
-        ClusterStatus, CreateTenantRequest, CreateTenantResponse, CronWorkloadAck,
+        AuditEntry, ClusterStatus, CreateTenantRequest, CreateTenantResponse, CronWorkloadAck,
         DelegatedKeyRequest, DelegatedKeyResponse, DeleteSagRuleRequest, DeleteWorkloadRequest,
         GenerateJoinTokenRequest, GenerateJoinTokenResponse, GetClusterStatusRequest,
-        GrantOperatorAccessRequest, ListNodesRequest, ListNodesResponse, ListOperatorAccessRequest,
-        ListOperatorAccessResponse, NodeAck, NodeId, OperatorAccessAck, OperatorAccessGrant,
-        OperatorScope, QuotaAck, QuotaRequest, QuotaResponse, RevokeOperatorAccessRequest,
-        SagRuleAck, ScaleWorkloadRequest, SecretAck, SecretAclChange, StoreSecretRequest,
-        TenantQuota, UpsertSagRuleRequest, WorkloadSpecAck,
+        GrantOperatorAccessRequest, ListAuditLogRequest, ListAuditLogResponse, ListNodesRequest,
+        ListNodesResponse, ListOperatorAccessRequest, ListOperatorAccessResponse, NodeAck, NodeId,
+        OperatorAccessAck, OperatorAccessGrant, OperatorScope, QuotaAck, QuotaRequest,
+        QuotaResponse, RevokeOperatorAccessRequest, SagRuleAck, ScaleWorkloadRequest, SecretAck,
+        SecretAclChange, StoreSecretRequest, TenantQuota, UpsertSagRuleRequest, WorkloadSpecAck,
     };
 }
 
