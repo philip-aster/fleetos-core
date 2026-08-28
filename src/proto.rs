@@ -12,9 +12,11 @@ pub mod admin {
         ClusterStatus, CreateTenantRequest, CreateTenantResponse, CronWorkloadAck,
         DelegatedKeyRequest, DelegatedKeyResponse, DeleteSagRuleRequest, DeleteWorkloadRequest,
         GenerateJoinTokenRequest, GenerateJoinTokenResponse, GetClusterStatusRequest,
-        ListNodesRequest, ListNodesResponse, NodeAck, NodeId, QuotaAck, QuotaRequest,
-        QuotaResponse, SagRuleAck, ScaleWorkloadRequest, SecretAck, SecretAclChange,
-        StoreSecretRequest, TenantQuota, UpsertSagRuleRequest, WorkloadSpecAck,
+        GrantOperatorAccessRequest, ListNodesRequest, ListNodesResponse, ListOperatorAccessRequest,
+        ListOperatorAccessResponse, NodeAck, NodeId, OperatorAccessAck, OperatorAccessGrant,
+        OperatorScope, QuotaAck, QuotaRequest, QuotaResponse, RevokeOperatorAccessRequest,
+        SagRuleAck, ScaleWorkloadRequest, SecretAck, SecretAclChange, StoreSecretRequest,
+        TenantQuota, UpsertSagRuleRequest, WorkloadSpecAck,
     };
 }
 

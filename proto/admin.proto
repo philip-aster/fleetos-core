@@ -36,9 +36,12 @@ service AdminService {
   // --- CR-2 / CR-7: tenant quotas ---
   rpc SetQuota(QuotaRequest) returns (QuotaAck);
   rpc GetQuota(QuotaRequest) returns (QuotaResponse);
-}
 
-// ================= Existing messages (unchanged) =================
+  // --- CR-8: Operator JIT access ---
+  rpc GrantOperatorAccess(GrantOperatorAccessRequest) returns (OperatorAccessAck);
+  rpc RevokeOperatorAccess(RevokeOperatorAccessRequest) returns (OperatorAccessAck);
+  rpc ListOperatorAccess(ListOperatorAccessRequest) returns (ListOperatorAccessResponse);
+}
 
 message CreateTenantRequest {
   string tenant_id = 1;
@@ -172,4 +175,52 @@ message QuotaAck {
 
 message QuotaResponse {
   TenantQuota quota = 1;
+}
+
+// ================= CR-8: Operator JIT access =================
+
+// Authorization scope for an operator grant.
+message OperatorScope {
+  // Full cluster-level admin access (node cordon/evict, SAG rules, tenants,
+  // operator management). Implies access to all tenants.
+  bool cluster_admin = 1;
+  // Tenants this operator may operate on for tenant-scoped actions
+  // (submit/scale/delete workloads, secrets). Empty = no tenant access
+  // unless cluster_admin is true.
+  repeated string tenants = 2;
+}
+
+message GrantOperatorAccessRequest {
+  // SPIFFE ID of the attested operator
+  // (spiffe://<admin-td>/ns/system/operator/<name>).
+  string operator_id = 1;
+  // Upper bound; control may grant less. 0 = use configured default.
+  uint64 ttl_secs = 2;
+  OperatorScope scope = 3;
+}
+
+message RevokeOperatorAccessRequest {
+  // Canonical id as returned by GrantOperatorAccess. Recomputed server-side
+  // via OperatorGrantId::of_grant — callers cannot forge ids.
+  string grant_id = 1;
+}
+
+message ListOperatorAccessRequest {}
+
+message OperatorAccessGrant {
+  string grant_id = 1;         // canonical; see OperatorGrantId::of_grant
+  string operator_id = 2;
+  string granted_by = 3;       // operator/admin who issued it
+  uint64 granted_at_unix = 4;  // leader-computed before proposal
+  uint64 expires_at_unix = 5;  // leader-computed before proposal
+  OperatorScope scope = 6;
+}
+
+message ListOperatorAccessResponse {
+  repeated OperatorAccessGrant grants = 1;
+}
+
+message OperatorAccessAck {
+  bool accepted = 1;
+  string grant_id = 2; // empty when accepted == false
 }

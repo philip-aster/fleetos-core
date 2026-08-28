@@ -22,6 +22,8 @@ pub mod version;
 #[cfg(feature = "minimal")]
 pub mod mesh;
 #[cfg(feature = "minimal")]
+pub mod operator;
+#[cfg(feature = "minimal")]
 pub mod policy;
 #[cfg(feature = "minimal")]
 pub mod spiffe;
@@ -44,6 +46,8 @@ pub use version::MonotonicVersion;
 
 #[cfg(feature = "minimal")]
 pub use mesh::MeshAddress;
+#[cfg(feature = "minimal")]
+pub use operator::OperatorGrantId;
 #[cfg(feature = "minimal")]
 pub use policy::{PeerSelector, SagAction, SagRule, SagRuleId, TenantCtx};
 #[cfg(feature = "minimal")]

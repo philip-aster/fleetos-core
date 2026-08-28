@@ -62,6 +62,7 @@ pub enum IdKind {
     Gateway,
     Ctrl,
     Control,
+    Operator,
 }
 
 impl fmt::Display for IdKind {
@@ -73,6 +74,7 @@ impl fmt::Display for IdKind {
             IdKind::Gateway => write!(f, "gateway"),
             IdKind::Ctrl => write!(f, "ctrl"),
             IdKind::Control => write!(f, "control"),
+            IdKind::Operator => write!(f, "operator"),
         }
     }
 }
@@ -87,6 +89,7 @@ impl FromStr for IdKind {
             "gateway" => Ok(IdKind::Gateway),
             "ctrl" => Ok(IdKind::Ctrl),
             "control" => Ok(IdKind::Control),
+            "operator" => Ok(IdKind::Operator),
             _ => Err(SvidError::InvalidKind),
         }
     }
@@ -101,6 +104,7 @@ pub(crate) fn kind_to_bytes(kind: &IdKind) -> &'static [u8] {
         IdKind::Gateway => b"gateway",
         IdKind::Ctrl => b"ctrl",
         IdKind::Control => b"control",
+        IdKind::Operator => b"operator",
     }
 }
 
