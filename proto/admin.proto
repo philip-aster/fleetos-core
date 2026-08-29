@@ -243,7 +243,7 @@ message AuditEntry {
   string actor = 3;
   string action = 4;
   string target = 5;
-  int64 timestamp_unix = 6;
+  uint64 timestamp_unix = 6;
 }
 
 message ListAuditLogResponse {
