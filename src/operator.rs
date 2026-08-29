@@ -20,10 +20,11 @@ pub struct OperatorGrantId([u8; 16]);
 impl OperatorGrantId {
     /// Deterministic content hash of an operator access grant.
     ///
-    /// Frozen layout (domain tag, then `0x00` between every field):
+    /// Frozen layout as of rc-3 (domain tag, then `0x00` between every field):
     /// `b"FleetOS v1 OperatorGrantId" || 0x00 || operator_id || 0x00 ||
     ///  granted_by || 0x00 || granted_at_unix (LE) || 0x00 ||
     ///  expires_at_unix (LE) || 0x00 || cluster_admin (1 byte) || 0x00 ||
+    ///  read_only (1 byte) || 0x00 ||
     ///  tenants (byte-wise sorted, deduped, 0x00-joined)`
     ///
     /// Tenant elements MUST NOT contain NUL bytes; enforced upstream by
@@ -35,6 +36,7 @@ impl OperatorGrantId {
         granted_at_unix: u64,
         expires_at_unix: u64,
         cluster_admin: bool,
+        read_only: bool,
         tenants: &[&str],
     ) -> Self {
         let mut hasher = blake3::Hasher::new();
@@ -49,6 +51,8 @@ impl OperatorGrantId {
         hasher.update(&expires_at_unix.to_le_bytes());
         hasher.update(&[0x00]);
         hasher.update(&[u8::from(cluster_admin)]);
+        hasher.update(&[0x00]);
+        hasher.update(&[u8::from(read_only)]);
         hasher.update(&[0x00]);
         // Canonical tenant set: byte-wise sorted + deduped, so semantically
         // identical scopes always yield the same id regardless of wire order.
@@ -66,7 +70,6 @@ impl OperatorGrantId {
         id_bytes.copy_from_slice(&hash.as_bytes()[..16]);
         Self(id_bytes)
     }
-
     pub fn as_bytes(&self) -> &[u8; 16] {
         &self.0
     }
@@ -132,6 +135,7 @@ mod tests {
             1_700_000_000,
             1_700_003_600,
             false,
+            false,
             tenants,
         )
     }
@@ -165,6 +169,7 @@ mod tests {
                 1_700_000_000,
                 1_700_003_600,
                 false,
+                false,
                 &["acme"],
             )
         );
@@ -175,6 +180,7 @@ mod tests {
                 "spiffe://admin.example.org/ns/system/operator/root",
                 1_700_000_001,
                 1_700_003_600,
+                false,
                 false,
                 &["acme"],
             )
@@ -187,6 +193,7 @@ mod tests {
                 1_700_000_000,
                 1_700_003_601,
                 false,
+                false,
                 &["acme"],
             )
         );
@@ -197,6 +204,20 @@ mod tests {
                 "spiffe://admin.example.org/ns/system/operator/root",
                 1_700_000_000,
                 1_700_003_600,
+                true,
+                false,
+                &["acme"],
+            )
+        );
+        // CR-8 amendment regression: read_only is grant content.
+        assert_ne!(
+            base,
+            OperatorGrantId::of_grant(
+                "spiffe://admin.example.org/ns/system/operator/alice",
+                "spiffe://admin.example.org/ns/system/operator/root",
+                1_700_000_000,
+                1_700_003_600,
+                false,
                 true,
                 &["acme"],
             )

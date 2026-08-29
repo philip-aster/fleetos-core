@@ -191,6 +191,11 @@ message OperatorScope {
   // (submit/scale/delete workloads, secrets). Empty = no tenant access
   // unless cluster_admin is true.
   repeated string tenants = 2;
+  // CR-8 amendment: read-only operators may perform read operations
+  // (List*/Get*) but not mutating operations. Orthogonal to cluster_admin
+  // and tenants — cluster_admin=true + read_only=true yields a read-only
+  // cluster admin.
+  bool read_only = 3;
 }
 
 message GrantOperatorAccessRequest {
