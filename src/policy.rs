@@ -70,6 +70,45 @@ impl SagRuleId {
         id_bytes.copy_from_slice(&hash.as_bytes()[..16]);
         SagRuleId(id_bytes)
     }
+
+    pub fn as_bytes(&self) -> &[u8; 16] {
+        &self.0
+    }
+
+    /// Lowercase-hex wire form (matches the `rule_id` string fields in admin.proto).
+    pub fn to_hex(&self) -> String {
+        const HEX: &[u8; 16] = b"0123456789abcdef";
+        let mut s = String::with_capacity(32);
+        for &b in &self.0 {
+            s.push(HEX[(b >> 4) as usize] as char);
+            s.push(HEX[(b & 0x0f) as usize] as char);
+        }
+        s
+    }
+
+    /// Parse the hex wire form. Accepts lower- and uppercase digits.
+    pub fn from_hex(s: &str) -> Option<Self> {
+        let bytes = s.as_bytes();
+        if bytes.len() != 32 {
+            return None;
+        }
+        let mut out = [0u8; 16];
+        for (i, slot) in out.iter_mut().enumerate() {
+            let hi = hex_val(bytes[2 * i])?;
+            let lo = hex_val(bytes[2 * i + 1])?;
+            *slot = (hi << 4) | lo;
+        }
+        Some(Self(out))
+    }
+}
+
+fn hex_val(b: u8) -> Option<u8> {
+    match b {
+        b'0'..=b'9' => Some(b - b'0'),
+        b'a'..=b'f' => Some(b - b'a' + 10),
+        b'A'..=b'F' => Some(b - b'A' + 10),
+        _ => None,
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
