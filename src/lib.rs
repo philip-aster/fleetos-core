@@ -45,6 +45,8 @@ pub use time::{Expiring, Ttl};
 pub use version::MonotonicVersion;
 
 #[cfg(feature = "minimal")]
+pub use attestation::EkFingerprint;
+#[cfg(feature = "minimal")]
 pub use mesh::MeshAddress;
 #[cfg(feature = "minimal")]
 pub use operator::OperatorGrantId;

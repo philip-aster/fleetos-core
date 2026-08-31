@@ -3,8 +3,17 @@ package fleetos;
 
 // The Attestation Service handles verifying hardware quotes and join tokens.
 service AttestationService {
+  // --- Insecure mode (testing): join-token flow, unchanged ---
   rpc RequestNonce(NonceRequest) returns (NonceResponse);
   rpc SubmitQuote(AttestationQuote) returns (AttestedIdentity);
+
+  // --- CR-10 secure mode (production): TPM 2.0 credential activation ---
+  // EK-rooted; no join token. RequestActivation issues the
+  // TPM2_MakeCredential challenge; SubmitActivationProof verifies the
+  // HMAC proof + PCR quote, signs the embedded CSR, and returns the
+  // issued node SVID in one step.
+  rpc RequestActivation(ActivationRequest) returns (ActivationChallenge);
+  rpc SubmitActivationProof(ActivationProof) returns (SvidResponse);
 }
 
 // The CA Service handles signing CSRs once attestation is verified.
@@ -27,6 +36,8 @@ message NonceResponse {
 }
 
 // Moved QuoteType to the top level so both messages can use it cleanly.
+// CR-10 decision 5: APPLE_SE is retained but NOT used for cluster
+// attestation (reserved for operator use). Removal would be breaking.
 enum QuoteType {
   TPM2 = 0;
   APPLE_SE = 1;
@@ -63,6 +74,9 @@ message CsrRequest {
 
 message SvidResponse {
   bytes cert_chain_der = 1;
+  // Insecure mode: may carry control-generated key material.
+  // CR-10 secure mode: EMPTY — the node holds its own private key; only
+  // the signed certificate chain is returned.
   bytes keypair_der = 2;
   uint64 svid_version = 3;
 }
@@ -72,4 +86,43 @@ message TrustBundleRequest {}
 message TrustBundle {
   string trust_domain = 1;
   repeated bytes roots_der = 2;
+}
+
+// ================= CR-10: secure attestation — TPM credential activation =================
+
+// Node -> Control: present ephemeral AK + EK to begin credential activation.
+message ActivationRequest {
+  // Ephemeral Attestation Key public key (TPMT_PUBLIC, marshaled).
+  bytes ak_pub = 1;
+  // EK certificate (DER). Preferred: enables manufacturer chain validation.
+  bytes ek_cert_der = 2;
+  // EK public key. Fallback when no certificate is available; also the
+  // canonical fingerprint input — control extracts the pub key from
+  // ek_cert_der and computes EkFingerprint::of_ek_pub on it, so one EK
+  // always yields one fingerprint regardless of presentation form.
+  bytes ek_pub = 3;
+}
+
+// Control -> Node: TPM2_MakeCredential challenge.
+message ActivationChallenge {
+  // credentialBlob output of TPM2_MakeCredential (TPM2B_ID_OBJECT).
+  bytes credential_blob = 1;
+  // secret output of TPM2_MakeCredential (TPM2B_ENCRYPTED_SECRET).
+  bytes secret = 2;
+  // Server-generated nonce; the node binds it into the HMAC proof.
+  bytes server_nonce = 3;
+}
+
+// Node -> Control: proof the credential was activated + attestation evidence + CSR.
+message ActivationProof {
+  // HMAC(key = S, payload = server_nonce). Proves S was unsealed by the TPM.
+  bytes hmac = 1;
+  // TPM quote (TPMS_ATTEST) with PCR selection (software-state attestation).
+  bytes quote = 2;
+  // AK signature over the quote.
+  bytes quote_signature = 3;
+  // Serialized PCR selection/values included in the quote.
+  bytes pcr_selection = 4;
+  // CSR for the node SVID (submitted after HMAC proof; decision 4).
+  bytes csr_der = 5;
 }

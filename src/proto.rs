@@ -15,8 +15,9 @@ pub mod admin {
         GrantOperatorAccessRequest, ListAuditLogRequest, ListAuditLogResponse, ListNodesRequest,
         ListNodesResponse, ListOperatorAccessRequest, ListOperatorAccessResponse, NodeAck, NodeId,
         OperatorAccessAck, OperatorAccessGrant, OperatorScope, QuotaAck, QuotaRequest,
-        QuotaResponse, RevokeOperatorAccessRequest, SagRuleAck, ScaleWorkloadRequest, SecretAck,
-        SecretAclChange, StoreSecretRequest, TenantQuota, UpsertSagRuleRequest, WorkloadSpecAck,
+        QuotaResponse, RegisterNodeEkRequest, RegisterNodeEkResponse, RevokeNodeEkRequest,
+        RevokeOperatorAccessRequest, SagRuleAck, ScaleWorkloadRequest, SecretAck, SecretAclChange,
+        StoreSecretRequest, TenantQuota, UpsertSagRuleRequest, WorkloadSpecAck,
     };
 }
 
@@ -24,8 +25,9 @@ pub mod identity {
     pub use crate::proto::fleetos::attestation_service_server::AttestationService;
     pub use crate::proto::fleetos::ca_service_server::CaService;
     pub use crate::proto::fleetos::{
-        AttestationQuote, AttestedIdentity, CsrRequest, NonceRequest, NonceResponse, QuoteType,
-        SvidResponse, TrustBundle, TrustBundleRequest,
+        ActivationChallenge, ActivationProof, ActivationRequest, AttestationQuote,
+        AttestedIdentity, CsrRequest, NonceRequest, NonceResponse, QuoteType, SvidResponse,
+        TrustBundle, TrustBundleRequest,
     };
 }
 

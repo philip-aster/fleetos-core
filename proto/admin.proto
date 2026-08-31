@@ -33,6 +33,10 @@ service AdminService {
   rpc CordonNode(NodeId) returns (NodeAck);
   rpc EvictNode(NodeId) returns (NodeAck); // admin-initiated; distinct from lease eviction
 
+  // --- CR-10: EK registration for secure attestation ---
+  rpc RegisterNodeEk(RegisterNodeEkRequest) returns (RegisterNodeEkResponse);
+  rpc RevokeNodeEk(RevokeNodeEkRequest) returns (NodeAck);
+
   // --- CR-2 / CR-7: tenant quotas ---
   rpc SetQuota(QuotaRequest) returns (QuotaAck);
   rpc GetQuota(QuotaRequest) returns (QuotaResponse);
@@ -156,6 +160,32 @@ message NodeId {
 
 message NodeAck {
   bool accepted = 1;
+}
+
+// ================= CR-10: EK registration for secure attestation =================
+
+message RegisterNodeEkRequest {
+  // EK certificate (DER). Preferred: enables manufacturer chain validation.
+  bytes ek_cert_der = 1;
+  // EK public key. Fallback when no certificate is available.
+  bytes ek_pub = 2;
+  // Optional: pre-bind to a node SPIFFE ID.
+  string node_id = 3;
+  // TTL for the registration (seconds). 0 = use configured default.
+  uint64 ttl_secs = 4;
+}
+
+message RegisterNodeEkResponse {
+  bool accepted = 1;
+  // Canonical fingerprint of the registered EK public key, lowercase-hex
+  // wire form. Recomputed via EkFingerprint::of_ek_pub — fleetos-core owns
+  // this hashing convention; local re-implementations are prohibited.
+  string ek_fingerprint = 2;
+}
+
+message RevokeNodeEkRequest {
+  // Canonical fingerprint as returned by RegisterNodeEk.
+  string ek_fingerprint = 1;
 }
 
 // ================= CR-7: tenant quotas =================
