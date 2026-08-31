@@ -47,9 +47,10 @@ pub struct AttestationQuote {
     /// SPIFFE ID; it is the sealing target for `crate::crypto::seal` /
     /// SecretService::FetchSecret.
     ///
-    /// SECURITY: claimed field — not covered by the hardware quote signature.
-    /// Binding to the attested identity is only as strong as quote
-    /// verification. Secret delivery must not go live until control's
+    /// SECURITY: claimed field — NOT covered by the hardware quote signature.
+    /// Binding to the attested identity is only as strong as quote verification
+    /// itself. Secret delivery MUST NOT be enabled in production until control's
+    /// tpm/apple_se signature verification is implemented.
     pub agent_x25519_pubkey: RecipientX25519Pubkey,
 }
 
