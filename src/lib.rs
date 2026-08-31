@@ -44,6 +44,8 @@ pub use hash::IdentityFingerprint;
 pub use time::{Expiring, Ttl};
 pub use version::MonotonicVersion;
 
+#[cfg(all(feature = "minimal", feature = "x509-cert", feature = "der"))]
+pub use attestation::EkExtractionError;
 #[cfg(feature = "minimal")]
 pub use attestation::EkFingerprint;
 #[cfg(feature = "minimal")]

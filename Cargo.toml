@@ -1,6 +1,6 @@
 [package]
 name = "fleetos-core"
-version = "0.1.5-rc-3"
+version = "0.1.5-rc-4"
 edition = "2024"
 license = "Apache-2.0"
 authors = ["Philip Aster and the FleetOS Contributors"]
@@ -18,7 +18,7 @@ apple-se = ["minimal", "dep:security-framework", "dep:sha2"]
 vsock-attest = ["minimal", "dep:vsock", "dep:sha2"]
 
 # CA signing helpers (fleetos-control only)
-ca = ["minimal", "dep:rcgen", "dep:x509-cert", "dep:der"]
+ca = ["minimal", "dep:rcgen", "x509-cert", "der"]
 
 # Mock attestation. STRICTLY excluded from release builds via compile_error!
 dev = ["minimal"]

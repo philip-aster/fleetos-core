@@ -167,7 +167,11 @@ message NodeAck {
 message RegisterNodeEkRequest {
   // EK certificate (DER). Preferred: enables manufacturer chain validation.
   bytes ek_cert_der = 1;
-  // EK public key. Fallback when no certificate is available.
+  // EK public key. Fallback when no certificate is available. Canonical
+  // form: SubjectPublicKeyInfo DER (RFC 5280 §4.1.2.7) — the exact bytes
+  // embedded in the EK certificate's TBS. When the certificate is
+  // available, control MUST fingerprint via EkFingerprint::of_ek_cert;
+  // of_ek_pub applies only when SPKI is already extracted.
   bytes ek_pub = 2;
   // Optional: pre-bind to a node SPIFFE ID.
   string node_id = 3;

@@ -10,6 +10,11 @@ use core::str::FromStr;
 use std::time::SystemTime;
 use thiserror::Error;
 
+#[cfg(all(feature = "x509-cert", feature = "der"))]
+use der::{Decode, Encode};
+#[cfg(all(feature = "x509-cert", feature = "der"))]
+use x509_cert::Certificate;
+
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum AttestError {
     #[error("quote generation failed")]
@@ -100,21 +105,47 @@ pub trait QuoteVerifier: Send + Sync {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct EkFingerprint([u8; 16]);
 
+// ================= CR-11: canonical EK extraction =================
+//
+// fleetos-core owns BOTH halves of EK convergence: the hashing convention
+// (of_ek_pub) and the cert extraction (of_ek_cert). Control MUST call
+// EkFingerprint::of_ek_cert for certificate-bearing registrations and MUST
+// NOT parse EK certificates locally; local extraction re-implementations
+// are prohibited.
+
+/// Failure to extract a canonical EK public key from an EK certificate.
+///
+/// CR-11: returned by `EkFingerprint::of_ek_cert`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
+pub enum EkExtractionError {
+    /// `ek_cert_der` was empty.
+    #[error("ek_cert_der is empty")]
+    EmptyInput,
+    /// Input does not parse as a DER X.509 certificate.
+    #[error("ek_cert_der does not parse as a DER X.509 certificate")]
+    MalformedDer,
+    /// Certificate parsed but the SubjectPublicKeyInfo could not be
+    /// materialized in canonical form.
+    #[error("certificate contains no usable SubjectPublicKeyInfo")]
+    MissingSpki,
+}
+
 impl EkFingerprint {
     /// Deterministic fingerprint of a canonical EK public key.
     ///
-    /// Input is the EK *public key* bytes, not the EK certificate: the same
-    /// EK presented via certificate or via raw public key MUST yield one
-    /// fingerprint, so the caller extracts the public key from `ek_cert_der`
-    /// before calling.
+    /// Canonical input form (CR-11): SubjectPublicKeyInfo DER (RFC 5280
+    /// §4.1.2.7) — the exact bytes embedded in the EK certificate's TBS.
+    /// When the certificate is available, prefer `of_ek_cert`, which owns
+    /// extraction; `of_ek_pub` applies only when SPKI is already extracted.
+    /// Convergence invariant: `of_ek_cert(cert) == of_ek_pub(spki_from_cert)`.
     ///
     /// Frozen layout as of CR-10 (domain tag, then a single `0x00` separator):
     ///   `b"FleetOS v1 EkFingerprint" || 0x00 || ek_pub`
     ///
-    /// Upstream contract: `ek_pub` MUST be non-empty and canonical
-    /// (TPM2B_PUBLIC marshaled or equivalent); validation happens at the
-    /// registration/activation boundary, not here (same pure-hasher rule as
-    /// `SagRuleId::of_rule` / `OperatorGrantId::of_grant`).
+    /// Upstream contract: `ek_pub` MUST be non-empty canonical SPKI DER;
+    /// validation happens at the registration/activation boundary, not here
+    /// (same pure-hasher rule as `SagRuleId::of_rule` /
+    /// `OperatorGrantId::of_grant`).
     pub fn of_ek_pub(ek_pub: &[u8]) -> Self {
         let mut hasher = blake3::Hasher::new();
         hasher.update(b"FleetOS v1 EkFingerprint");
@@ -124,6 +155,31 @@ impl EkFingerprint {
         let hash = hasher.finalize();
         id_bytes.copy_from_slice(&hash.as_bytes()[..16]);
         Self(id_bytes)
+    }
+
+    /// Deterministic fingerprint of the EK presented as an X.509 certificate.
+    ///
+    /// CR-11 convergence invariant:
+    ///   `of_ek_cert(cert_der) == of_ek_pub(spki_der)`
+    /// where `spki_der` is the SubjectPublicKeyInfo DER (RFC 5280 §4.1.2.7)
+    /// embedded in the certificate's TBS. fleetos-core owns this extraction;
+    /// one EK yields one fingerprint regardless of presentation form.
+    ///
+    /// Available under the `x509-cert` + `der` features (enabled via `ca` /
+    /// `production`).
+    #[cfg(all(feature = "x509-cert", feature = "der"))]
+    pub fn of_ek_cert(ek_cert_der: &[u8]) -> Result<Self, EkExtractionError> {
+        if ek_cert_der.is_empty() {
+            return Err(EkExtractionError::EmptyInput);
+        }
+        let cert =
+            Certificate::from_der(ek_cert_der).map_err(|_| EkExtractionError::MalformedDer)?;
+        let spki_der = cert
+            .tbs_certificate()
+            .subject_public_key_info()
+            .to_der()
+            .map_err(|_| EkExtractionError::MissingSpki)?;
+        Ok(Self::of_ek_pub(&spki_der))
     }
 
     pub fn as_bytes(&self) -> &[u8; 16] {
@@ -238,5 +294,108 @@ mod ek_fingerprint_tests {
         assert_eq!(EkFingerprint::from_hex(&hex.to_uppercase()), Some(fp));
         assert!(EkFingerprint::from_hex("nothex").is_none());
         assert!(EkFingerprint::from_hex(&"0".repeat(31)).is_none());
+    }
+}
+
+#[cfg(all(test, feature = "ca"))]
+mod ek_cert_extraction_tests {
+    use super::*;
+    use rcgen::{CertificateParams, KeyPair};
+
+    /// (cert DER, SPKI DER) — generates a fresh default keypair (ECC/Ed25519).
+    fn make_cert(subject: &str) -> (Vec<u8>, Vec<u8>) {
+        let key_pair = KeyPair::generate().expect("keygen");
+        let params = CertificateParams::new(vec![subject.to_string()]).expect("params");
+        let cert = params.self_signed(&key_pair).expect("self_signed");
+        let cert_der = cert.der().to_vec();
+        // rcgen exposes the public key as RFC 7468 "PUBLIC KEY" PEM (the SPKI);
+        // decode the base64 body to DER for the of_ek_pub convergence assertion.
+        let spki_der = pem_spki_to_der(&key_pair.public_key_pem());
+        (cert_der, spki_der)
+    }
+
+    /// Strip the -----BEGIN/END----- lines and base64-decode the body.
+    fn pem_spki_to_der(pem: &str) -> Vec<u8> {
+        let body: String = pem
+            .lines()
+            .filter(|line| !line.starts_with("-----"))
+            .collect();
+        base64_decode(&body)
+    }
+
+    fn base64_decode(input: &str) -> Vec<u8> {
+        let mut table = [255u8; 256];
+        for (i, &c) in b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+            .iter()
+            .enumerate()
+        {
+            table[c as usize] = i as u8;
+        }
+        let mut out = Vec::new();
+        let mut accum: u32 = 0;
+        let mut bits: u32 = 0;
+        for &b in input.as_bytes() {
+            let v = table[b as usize];
+            if v == 255 {
+                continue; // skips '=', newlines, whitespace
+            }
+            accum = (accum << 6) | v as u32;
+            bits += 6;
+            if bits >= 8 {
+                bits -= 8;
+                out.push((accum >> bits) as u8);
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn convergence_cert_vs_spki() {
+        let (cert_der, spki_der) = make_cert("node-a.fleetos.test");
+        let via_cert = EkFingerprint::of_ek_cert(&cert_der).expect("of_ek_cert");
+        let via_spki = EkFingerprint::of_ek_pub(&spki_der);
+        assert_eq!(via_cert, via_spki, "one EK must yield one fingerprint");
+    }
+
+    #[test]
+    fn rejects_empty_and_malformed() {
+        assert_eq!(
+            EkFingerprint::of_ek_cert(&[]),
+            Err(EkExtractionError::EmptyInput)
+        );
+        assert_eq!(
+            EkFingerprint::of_ek_cert(&[0x30, 0x03, 0x02, 0x01]), // truncated TLV
+            Err(EkExtractionError::MalformedDer)
+        );
+        assert_eq!(
+            EkFingerprint::of_ek_cert(b"not a cert"),
+            Err(EkExtractionError::MalformedDer)
+        );
+        let (cert_der, _) = make_cert("node-b.fleetos.test");
+        // Deterministic corruption: a cert missing its final byte cannot parse.
+        assert_eq!(
+            EkFingerprint::of_ek_cert(&cert_der[..cert_der.len() - 1]),
+            Err(EkExtractionError::MalformedDer)
+        );
+    }
+
+    #[test]
+    fn distinct_keys_distinct_fingerprints() {
+        let (cert_a, _) = make_cert("node-a.fleetos.test");
+        let (cert_b, _) = make_cert("node-b.fleetos.test");
+        assert_ne!(
+            EkFingerprint::of_ek_cert(&cert_a).unwrap(),
+            EkFingerprint::of_ek_cert(&cert_b).unwrap()
+        );
+    }
+
+    #[test]
+    fn whole_cert_bytes_are_not_the_fingerprint_input() {
+        // Guards against callers passing raw cert bytes to of_ek_pub.
+        let (cert_der, spki_der) = make_cert("node-c.fleetos.test");
+        assert_ne!(
+            EkFingerprint::of_ek_pub(&cert_der),
+            EkFingerprint::of_ek_pub(&spki_der)
+        );
     }
 }

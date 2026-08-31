@@ -96,10 +96,12 @@ message ActivationRequest {
   bytes ak_pub = 1;
   // EK certificate (DER). Preferred: enables manufacturer chain validation.
   bytes ek_cert_der = 2;
-  // EK public key. Fallback when no certificate is available; also the
-  // canonical fingerprint input — control extracts the pub key from
-  // ek_cert_der and computes EkFingerprint::of_ek_pub on it, so one EK
-  // always yields one fingerprint regardless of presentation form.
+  // EK public key. Fallback when no certificate is available. Canonical
+  // form: SubjectPublicKeyInfo DER (RFC 5280 §4.1.2.7) — the exact bytes
+  // embedded in the EK certificate's TBS. When the certificate is
+  // available, control MUST fingerprint via EkFingerprint::of_ek_cert;
+  // of_ek_pub applies only when SPKI is already extracted. One EK yields
+  // one fingerprint regardless of presentation form.
   bytes ek_pub = 3;
 }
 
