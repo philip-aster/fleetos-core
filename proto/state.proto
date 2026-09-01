@@ -91,11 +91,28 @@ message RouteEntry {
 message WatchEvent {
   oneof event {
     SecretRotationNotification secret_rotation = 1;
+    // CR-13 / V-4c: broadcast after each Raft-replicated UpsertSvidVersion
+    // commit so agents learn a workload's SVID was reissued and can refetch
+    // secrets sealed for the new version. Silent drops are an audit blocker.
+    SvidRotationNotification svid_rotation = 2;
   }
 }
 
 message SecretRotationNotification {
   string spiffe_id = 1;
+}
+
+// CR-13 / V-4c: notification that a workload SVID was reissued
+// (leader-only issuance, version replicated through Raft).
+message SvidRotationNotification {
+  // Canonical SPIFFE URI string — same format as
+  // SecretRotationNotification.spiffe_id.
+  string spiffe_id = 1;
+  // The new SVID version after the rotation. Monotonically increasing per
+  // spiffe_id (MonotonicVersion semantics). Agents compare against
+  // FetchSecretRequest.sealed_for_svid_version to decide whether secrets
+  // sealed for a prior version need refetching.
+  uint64 svid_version = 2;
 }
 
 message WorkloadStatusReport {

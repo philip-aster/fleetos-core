@@ -49,8 +49,8 @@ pub mod state {
     pub use crate::proto::fleetos::workload_status_service_server::WorkloadStatusService;
     pub use crate::proto::fleetos::{
         PeerSelector, RouteEntry, RouteUpdate, SagRule, SagUpdate, ScheduleUpdate,
-        SecretRotationNotification, StatusAck, WatchEvent, WatchRequest, WorkloadAssignment,
-        WorkloadStatusReport,
+        SecretRotationNotification, StatusAck, SvidRotationNotification, WatchEvent, WatchRequest,
+        WorkloadAssignment, WorkloadStatusReport,
     };
 }
 
