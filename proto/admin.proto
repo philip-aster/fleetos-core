@@ -3,6 +3,7 @@ package fleetos;
 
 import "workload.proto";
 import "state.proto"; // CR-2: reuse SagRule/PeerSelector — never redefine.
+import "provisioning.proto"; // CR-12: reuse NodeKind — never redefine.
 
 service AdminService {
   // --- Existing surface (unchanged) ---
@@ -32,6 +33,11 @@ service AdminService {
   // --- CR-2: node administration ---
   rpc CordonNode(NodeId) returns (NodeAck);
   rpc EvictNode(NodeId) returns (NodeAck); // admin-initiated; distinct from lease eviction
+
+  // --- CR-12: node pool management (V-3 remediation — Raft entry point) ---
+  rpc CreateNodePool(NodePoolCreateRequest) returns (NodePoolAck);
+  rpc DeleteNodePool(NodePoolDeleteRequest) returns (NodePoolAck);
+  rpc ListNodePools(ListNodePoolsRequest) returns (ListNodePoolsResponse);
 
   // --- CR-10: EK registration for secure attestation ---
   rpc RegisterNodeEk(RegisterNodeEkRequest) returns (RegisterNodeEkResponse);
@@ -160,6 +166,52 @@ message NodeId {
 
 message NodeAck {
   bool accepted = 1;
+}
+
+// ================= CR-12: node pool management =================
+// V-3 remediation: pool lifecycle enters through these RPCs so control
+// proposes StoreNodePool/DeleteNodePool through Raft instead of writing
+// fjall directly. Pool state becomes replicated and survives failover.
+
+message NodePoolCreateRequest {
+  // Operator-assigned primary key; the state machine keys on this.
+  string pool_id = 1;
+  // Imported from provisioning.proto — never redefine.
+  NodeKind node_kind = 2;
+  uint32 desired_count = 3;
+  // Flat resource fields deliberately mirror control's NodePoolRecord
+  // (the Raft payload). Do not collapse into provisioning.ResourceSpec.
+  uint32 vcpus = 4;
+  uint32 memory_mb = 5;
+  uint32 disk_gb = 6;
+  string region_hint = 7;
+  // No bootstrap_payload: the ProvisioningReconciler constructs it at
+  // reconciliation time with a fresh join token — never stored replicated.
+}
+
+message NodePoolDeleteRequest {
+  string pool_id = 1;
+}
+
+message NodePoolAck {
+  bool accepted = 1;
+}
+
+message ListNodePoolsRequest {}
+
+message NodePoolInfo {
+  // Mirrors control's NodePoolRecord for the list response.
+  string pool_id = 1;
+  NodeKind node_kind = 2;
+  uint32 desired_count = 3;
+  uint32 vcpus = 4;
+  uint32 memory_mb = 5;
+  uint32 disk_gb = 6;
+  string region_hint = 7;
+}
+
+message ListNodePoolsResponse {
+  repeated NodePoolInfo pools = 1;
 }
 
 // ================= CR-10: EK registration for secure attestation =================
