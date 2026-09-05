@@ -127,4 +127,10 @@ message ActivationProof {
   bytes pcr_selection = 4;
   // CSR for the node SVID (submitted after HMAC proof; decision 4).
   bytes csr_der = 5;
+  // CR-14 / S-10: node's X25519 sealing pubkey (MUST be exactly 32 bytes).
+  // Secure-flow counterpart of AttestationQuote.agent_x25519_pubkey. Control
+  // persists this into the node's SvidRecord (svids keyspace) via
+  // UpsertSvidVersion so SecretService.fetch_secret resolves the sealing
+  // target identically across insecure and secure flows.
+  bytes agent_x25519_pubkey = 6;
 }

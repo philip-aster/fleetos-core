@@ -7,6 +7,7 @@ pub mod fleetos {
 }
 
 pub mod admin {
+    pub use crate::proto::fleetos::admin_service_client::AdminServiceClient;
     pub use crate::proto::fleetos::admin_service_server::AdminService;
     pub use crate::proto::fleetos::{
         AuditEntry, ClusterStatus, CreateTenantRequest, CreateTenantResponse, CronWorkloadAck,
@@ -16,15 +17,18 @@ pub mod admin {
         ListNodePoolsRequest, ListNodePoolsResponse, ListNodesRequest, ListNodesResponse,
         ListOperatorAccessRequest, ListOperatorAccessResponse, NodeAck, NodeId, NodePoolAck,
         NodePoolCreateRequest, NodePoolDeleteRequest, NodePoolInfo, OperatorAccessAck,
-        OperatorAccessGrant, OperatorScope, QuotaAck, QuotaRequest, QuotaResponse,
-        RegisterNodeEkRequest, RegisterNodeEkResponse, RevokeNodeEkRequest,
+        OperatorAccessGrant, OperatorScope, PcrPolicyAck, PcrValueProto, QuotaAck, QuotaRequest,
+        QuotaResponse, RegisterNodeEkRequest, RegisterNodeEkResponse, RevokeNodeEkRequest,
         RevokeOperatorAccessRequest, SagRuleAck, ScaleWorkloadRequest, SecretAck, SecretAclChange,
-        StoreSecretRequest, TenantQuota, UpsertSagRuleRequest, WorkloadSpecAck,
+        SetPcrPolicyRequest, StoreSecretRequest, TenantQuota, UpsertSagRuleRequest,
+        WorkloadSpecAck,
     };
 }
 
 pub mod identity {
+    pub use crate::proto::fleetos::attestation_service_client::AttestationServiceClient;
     pub use crate::proto::fleetos::attestation_service_server::AttestationService;
+    pub use crate::proto::fleetos::ca_service_client::CaServiceClient;
     pub use crate::proto::fleetos::ca_service_server::CaService;
     pub use crate::proto::fleetos::{
         ActivationChallenge, ActivationProof, ActivationRequest, AttestationQuote,

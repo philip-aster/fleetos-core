@@ -12,24 +12,24 @@ default = ["minimal"]
 # Base primitives required by almost everyone
 minimal = ["dep:prost", "dep:tonic", "dep:tonic-prost", "dep:bytes", "dep:rand", "dep:chacha20poly1305", "dep:rustls", "dep:tracing", "dep:zeroize", "dep:x25519-dalek"]
 
-# Attestation backends (All imply `minimal` so they have SpiffeId/Hash/Proto)
-tpm = ["minimal", "dep:tss-esapi", "dep:sha2"]
+# Attestation backends (all imply `minimal` so they have SpiffeId/Hash/Proto)
+tpm = ["minimal", "dep:tss-esapi", "dep:sha2", "dep:spki"]
 apple-se = ["minimal", "dep:security-framework", "dep:sha2"]
 vsock-attest = ["minimal", "dep:vsock", "dep:sha2"]
 
+# CR-14/A4: software quote-signature verification (RSA + ECDSA), device-free.
+# Deliberately NOT under `tpm` — it must run in CI with no swtpm/hardware.
+software-quote-verify = ["minimal", "dep:rsa", "dep:ecdsa", "dep:p256", "dep:signature", "dep:sha2"]
+
 # CA signing helpers (fleetos-control only)
 ca = ["minimal", "dep:rcgen", "x509-cert", "der"]
-
-# Mock attestation. STRICTLY excluded from release builds via compile_error!
 dev = ["minimal"]
+full = ["tpm", "apple-se", "vsock-attest", "ca", "software-quote-verify", "dev"]
 
-# Meta-feature
-full = ["tpm", "apple-se", "vsock-attest", "ca", "dev"]
+# Meta-feature for everything except mock/dev attestation.
+# Includes software-quote-verify so `--features production` builds the verifier.
+production = ["tpm", "apple-se", "vsock-attest", "ca", "software-quote-verify"]
 
-# Meta-feature for everything except mock/dev attestation
-production = ["tpm", "apple-se", "vsock-attest", "ca"]
-
-# Future sharded/stateful-partition addressing model
 experimental-ordinal-routing = []
 
 bytes = ["dep:bytes"]
@@ -40,6 +40,7 @@ tonic = ["dep:tonic"]
 prost = ["dep:prost"]
 tss-esapi = ["dep:tss-esapi"]
 sha2 = ["dep:sha2"]
+spki = ["dep:spki"]
 
 [dependencies]
 async-trait = "0.1.92"
@@ -48,13 +49,18 @@ bytemuck = { version = "1.25.2", default-features = false, features = ["derive"]
 bytes = { version = "1.12.1", optional = true }
 chacha20poly1305 = { version = "0.11.0", optional = true }
 der = { version = "0.8.1", optional = true }
+ecdsa = { version = "0.17.0", optional = true }
+p256 = { version = "0.14.0", optional = true, features = ["ecdsa"] }
 prost = { version = "0.14.4", optional = true }
 rand = { version = "0.10.2", optional = true }
 rcgen = { version = "0.14.9", optional = true }
+rsa = { version = "0.9.10", optional = true, default-features = false, features = ["sha2"] }
 rustls = { version = "0.23.43", optional = true }
 security-framework = { version = "3.7.0", optional = true }
 serde = { version = "1.0.229", default-features = false, features = ["derive"] }
 sha2 = { version = "0.11.0", optional = true }
+signature = { version = "3.0.0", optional = true }
+spki = { version = "0.8.0", optional = true }
 thiserror = { version = "2.0.20", default-features = false }
 tonic = { version = "0.14.6", optional = true }
 tonic-prost = { version = "0.14.6", optional = true }

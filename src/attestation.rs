@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 //! Hardware-rooted attestation traits and types.
-
+pub mod quote;
+#[cfg(feature = "tpm")]
+pub mod tpm;
 use crate::crypto::RecipientX25519Pubkey;
 use crate::nonce::Nonce;
 use crate::spiffe::SpiffeId;
@@ -59,12 +61,98 @@ pub struct AttestationQuote {
     pub agent_x25519_pubkey: RecipientX25519Pubkey,
 }
 
-/// PCR policy mapping. PCRs included depend on backend.
-#[derive(Debug, Clone, Default)]
+// ================= CR-14/A6: canonical PCR model =================
+//
+// Resolves the split-brain between core's former fixed-field PcrPolicy
+// (pcr0_firmware / pcr7_secure_boot / pcr9_kernel) and control's
+// Vec<PcrValue> model. The Vec<PcrValue> model is canonical in core;
+// control's PcrPolicyStore wraps it. PCRs included depend on backend, so a
+// fixed register list was always wrong.
+
+/// A single PCR register value.
+///
+/// `hash_algorithm` is the TPMI_ALG_HASH (SHA-256 = 0x000B). `digest` is the
+/// raw register digest. Equality across (index, hash_algorithm) is what
+/// `verify_pcr_policy` matches on.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct PcrValue {
+    /// PCR index (0-23).
+    pub index: u8,
+    /// Hash algorithm identifier (TPMI_ALG_HASH; SHA-256 = 0x000B).
+    pub hash_algorithm: u16,
+    /// The PCR digest value.
+    pub digest: Vec<u8>,
+}
+
+/// Canonical PCR policy: the set of register values a node must present.
+///
+/// An empty `expected_pcrs` means the policy mandates no registers and
+/// `verify_pcr_policy` passes trivially. Whether an empty policy is
+/// *acceptable* in secure mode is a control-side decision (fail-closed), not
+/// a concern of this pure function.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PcrPolicy {
-    pub pcr0_firmware: Option<[u8; 32]>,
-    pub pcr7_secure_boot: Option<[u8; 32]>,
-    pub pcr9_kernel: Option<[u8; 32]>,
+    /// Expected PCR values (index + algorithm + digest).
+    pub expected_pcrs: Vec<PcrValue>,
+}
+
+/// Verify that a submitted PCR selection covers every register the policy
+/// mandates and that each digest matches. Fail-closed: any mandated register
+/// that is absent, uses a different hash algorithm, or mismatches its digest
+/// is rejected.
+///
+/// Pure and allocation-free beyond iteration. Selection coverage is the
+/// "policy-mandated registers must be present" half; digest match is the
+/// "software state is known-good" half.
+pub fn verify_pcr_policy(submitted: &[PcrValue], policy: &PcrPolicy) -> Result<(), AttestError> {
+    for expected in &policy.expected_pcrs {
+        let found = submitted
+            .iter()
+            .find(|p| p.index == expected.index && p.hash_algorithm == expected.hash_algorithm)
+            .ok_or(AttestError::PolicyMismatch)?;
+        // Constant-time comparison of digests.
+        if !ct_eq(&found.digest, &expected.digest) {
+            return Err(AttestError::PolicyMismatch);
+        }
+    }
+    Ok(())
+}
+
+// ================= CR-14/A3: activation proof =================
+//
+// Core owns this convention. The activation proof proves the node recovered
+// the credential secret S: it is keyed_hash(S, server_nonce). The verifier
+// recomputes it from S (which only a genuine TPM ActivateCredential can
+// produce) and the server nonce.
+
+/// Compute the activation proof: `BLAKE3_keyed_hash(key = secret, msg = server_nonce)`.
+///
+/// `secret` is the 32-byte credential secret `S` recovered from
+/// `TPM2_ActivateCredential`. Pure and device-free.
+pub fn compute_activation_proof(secret: &[u8; 32], server_nonce: &[u8]) -> [u8; 32] {
+    *blake3::keyed_hash(secret, server_nonce).as_bytes()
+}
+
+/// Verify an activation proof by recomputing it. Constant-time on the digest.
+///
+/// Inverse of `compute_activation_proof`: returns true iff the prover knew
+/// `secret` for the given `server_nonce`.
+pub fn verify_activation_proof(secret: &[u8; 32], server_nonce: &[u8], proof: &[u8; 32]) -> bool {
+    let expected = compute_activation_proof(secret, server_nonce);
+    ct_eq(&expected, proof)
+}
+
+/// Constant-time byte-slice equality. Rejects length mismatch early (length
+/// itself is not secret here — digests are fixed-size and public algorithm).
+fn ct_eq(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut acc = 0u8;
+    for (x, y) in a.iter().zip(b.iter()) {
+        acc |= x ^ y;
+    }
+    acc == 0
 }
 
 #[derive(Debug, Clone)]
@@ -397,5 +485,91 @@ mod ek_cert_extraction_tests {
             EkFingerprint::of_ek_pub(&cert_der),
             EkFingerprint::of_ek_pub(&spki_der)
         );
+    }
+}
+
+#[cfg(test)]
+mod cr14_tests {
+    use super::*;
+
+    fn pcr(index: u8, digest: Vec<u8>) -> PcrValue {
+        PcrValue {
+            index,
+            hash_algorithm: 0x000B,
+            digest,
+        }
+    }
+
+    #[test]
+    fn pcr_policy_passes_when_all_match() {
+        let policy = PcrPolicy {
+            expected_pcrs: vec![pcr(0, vec![1; 32]), pcr(7, vec![2; 32])],
+        };
+        let submitted = vec![
+            pcr(7, vec![2; 32]),
+            pcr(0, vec![1; 32]),
+            pcr(9, vec![9; 32]),
+        ];
+        assert!(verify_pcr_policy(&submitted, &policy).is_ok());
+    }
+
+    #[test]
+    fn pcr_policy_fails_closed_on_missing_register() {
+        let policy = PcrPolicy {
+            expected_pcrs: vec![pcr(0, vec![1; 32]), pcr(7, vec![2; 32])],
+        };
+        let submitted = vec![pcr(0, vec![1; 32])]; // PCR7 absent
+        assert!(matches!(
+            verify_pcr_policy(&submitted, &policy),
+            Err(AttestError::PolicyMismatch)
+        ));
+    }
+
+    #[test]
+    fn pcr_policy_fails_closed_on_digest_mismatch() {
+        let policy = PcrPolicy {
+            expected_pcrs: vec![pcr(0, vec![1; 32])],
+        };
+        let submitted = vec![pcr(0, vec![0xFF; 32])];
+        assert!(matches!(
+            verify_pcr_policy(&submitted, &policy),
+            Err(AttestError::PolicyMismatch)
+        ));
+    }
+
+    #[test]
+    fn pcr_policy_fails_closed_on_algorithm_mismatch() {
+        let policy = PcrPolicy {
+            expected_pcrs: vec![pcr(0, vec![1; 32])],
+        };
+        let mut submitted = vec![pcr(0, vec![1; 32])];
+        submitted[0].hash_algorithm = 0x000C; // different algorithm
+        assert!(matches!(
+            verify_pcr_policy(&submitted, &policy),
+            Err(AttestError::PolicyMismatch)
+        ));
+    }
+
+    #[test]
+    fn empty_policy_passes_trivially() {
+        // Fail-closed-on-empty-policy is a control-side decision, not this fn's.
+        assert!(verify_pcr_policy(&[], &PcrPolicy::default()).is_ok());
+    }
+
+    #[test]
+    fn activation_proof_roundtrip() {
+        let secret = [7u8; 32];
+        let nonce = b"server-nonce-bytes";
+        let proof = compute_activation_proof(&secret, nonce);
+        assert!(verify_activation_proof(&secret, nonce, &proof));
+    }
+
+    #[test]
+    fn activation_proof_rejects_wrong_secret_or_nonce() {
+        let secret = [7u8; 32];
+        let nonce = b"server-nonce-bytes";
+        let proof = compute_activation_proof(&secret, nonce);
+        assert!(!verify_activation_proof(&[8u8; 32], nonce, &proof));
+        assert!(!verify_activation_proof(&secret, b"other-nonce", &proof));
     }
 }

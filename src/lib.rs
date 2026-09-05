@@ -48,6 +48,16 @@ pub use version::MonotonicVersion;
 pub use attestation::EkExtractionError;
 #[cfg(feature = "minimal")]
 pub use attestation::EkFingerprint;
+#[cfg(all(feature = "minimal", feature = "software-quote-verify"))]
+pub use attestation::quote::software::verify_quote_signature;
+#[cfg(feature = "minimal")]
+pub use attestation::quote::{
+    AppleSeAttestation, TpmQuote, verify_apple_se_structure, verify_quote_structure,
+};
+#[cfg(feature = "minimal")]
+pub use attestation::{
+    PcrPolicy, PcrValue, compute_activation_proof, verify_activation_proof, verify_pcr_policy,
+};
 #[cfg(feature = "minimal")]
 pub use mesh::MeshAddress;
 #[cfg(feature = "minimal")]

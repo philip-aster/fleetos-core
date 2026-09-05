@@ -43,6 +43,12 @@ service AdminService {
   rpc RegisterNodeEk(RegisterNodeEkRequest) returns (RegisterNodeEkResponse);
   rpc RevokeNodeEk(RevokeNodeEkRequest) returns (NodeAck);
 
+  // --- CR-14: PCR policy registration (secure attestation software state) ---
+  // The state machine already applies FleetosCommand::SetPcrPolicy, but had no
+  // RPC to propose it — so PCR policies could never be registered and quote
+  // verification could never enforce software state. This closes that gap.
+  rpc SetPcrPolicy(SetPcrPolicyRequest) returns (PcrPolicyAck);
+
   // --- CR-2 / CR-7: tenant quotas ---
   rpc SetQuota(QuotaRequest) returns (QuotaAck);
   rpc GetQuota(QuotaRequest) returns (QuotaResponse);
@@ -242,6 +248,24 @@ message RegisterNodeEkResponse {
 message RevokeNodeEkRequest {
   // Canonical fingerprint as returned by RegisterNodeEk.
   string ek_fingerprint = 1;
+}
+
+// ================= CR-14: PCR policy registration =================
+message SetPcrPolicyRequest {
+  // Node SPIFFE ID the policy applies to.
+  string node_id = 1;
+  // Expected PCR register values (canonical model, mirrors core PcrValue).
+  repeated PcrValueProto expected_pcrs = 2;
+  // Whether this policy is currently enforced for the node.
+  bool active = 3;
+}
+message PcrValueProto {
+  uint32 index = 1;           // PCR index 0-23
+  uint32 hash_algorithm = 2;  // TPMI_ALG_HASH (SHA-256 = 0x000B)
+  bytes digest = 3;
+}
+message PcrPolicyAck {
+  bool accepted = 1;
 }
 
 // ================= CR-7: tenant quotas =================

@@ -514,12 +514,35 @@ pub mod ca {
         pub expires_at_unix: u64,
     }
 
-    pub fn build_csr(
-        _id: &SpiffeId,
-        _role: Option<&WorkloadRole>,
-        _keypair: &KeyPair,
-    ) -> Result<Csr, SvidError> {
-        Err(SvidError::Unimplemented)
+    pub fn build_csr(id: &SpiffeId, keypair: &KeyPair) -> Result<Csr, SvidError> {
+        // CSR carries ONLY the SPIFFE URI SAN + standard extensions. Role,
+        // ordinal, and degraded are stamped by the CA at signing time (CR-14/A7,
+        // Q4) — never embedded in the CSR, so a compromised joiner cannot assert
+        // its own role.
+        let mut params = rcgen::CertificateParams::new(Vec::<String>::new())
+            .map_err(|_| SvidError::InvalidFormat)?;
+        let spiffe_uri: rcgen::string::Ia5String = id
+            .to_string()
+            .try_into()
+            .map_err(|_| SvidError::InvalidFormat)?;
+        params
+            .subject_alt_names
+            .push(rcgen::SanType::URI(spiffe_uri));
+        let mut dn = rcgen::DistinguishedName::new();
+        dn.push(rcgen::DnType::CommonName, id.to_string());
+        params.distinguished_name = dn;
+        params.key_usages = vec![rcgen::KeyUsagePurpose::DigitalSignature];
+        params.extended_key_usages = vec![
+            rcgen::ExtendedKeyUsagePurpose::ClientAuth,
+            rcgen::ExtendedKeyUsagePurpose::ServerAuth,
+        ];
+        params.is_ca = rcgen::IsCa::NoCa;
+        let csr = params
+            .serialize_request(keypair)
+            .map_err(|_| SvidError::InvalidFormat)?;
+        Ok(Csr {
+            der: csr.der().to_vec(),
+        })
     }
 
     pub fn sign_svid(
