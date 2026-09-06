@@ -75,3 +75,8 @@ pub use policy::ServiceAuthorizationGraph;
 
 #[cfg(feature = "minimal")]
 pub use nonce::Nonce;
+
+#[cfg(all(feature = "minimal", feature = "software-quote-verify"))]
+pub use attestation::quote::verify_pcr_binding;
+#[cfg(all(feature = "minimal", feature = "tpm"))]
+pub use attestation::{AttestationSession, QuoteOutput};

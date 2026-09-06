@@ -12,6 +12,9 @@ use core::str::FromStr;
 use std::time::SystemTime;
 use thiserror::Error;
 
+#[cfg(feature = "tpm")]
+pub use tpm::{AttestationSession, QuoteOutput};
+
 #[cfg(all(feature = "x509-cert", feature = "der"))]
 use der::{Decode, Encode};
 #[cfg(all(feature = "x509-cert", feature = "der"))]
@@ -144,7 +147,7 @@ pub fn verify_activation_proof(secret: &[u8; 32], server_nonce: &[u8], proof: &[
 
 /// Constant-time byte-slice equality. Rejects length mismatch early (length
 /// itself is not secret here — digests are fixed-size and public algorithm).
-fn ct_eq(a: &[u8], b: &[u8]) -> bool {
+pub(crate) fn ct_eq(a: &[u8], b: &[u8]) -> bool {
     if a.len() != b.len() {
         return false;
     }

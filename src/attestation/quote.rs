@@ -247,6 +247,10 @@ pub mod software {
         fn skip(&mut self, n: usize) -> Result<(), AttestError> {
             self.take(n).map(|_| ())
         }
+        fn u8(&mut self) -> Result<u8, AttestError> {
+            let b = self.take(1)?;
+            Ok(b[0])
+        }
         fn u16(&mut self) -> Result<u16, AttestError> {
             let b = self.take(2)?;
             Ok(u16::from_be_bytes([b[0], b[1]]))
@@ -256,7 +260,265 @@ pub mod software {
             Ok(u32::from_be_bytes([b[0], b[1], b[2], b[3]]))
         }
     }
+
+    /// TPMI_ST_ATTEST selector for TPM2_Quote.
+    const TPM_ST_ATTEST_QUOTE: u16 = 0x8018;
+    /// TPMI_ALG_HASH selectors.
+    const TPM_ALG_SHA256: u16 = 0x000B;
+    const TPM_ALG_SHA384: u16 = 0x000C;
+    const TPM_ALG_SHA512: u16 = 0x000D;
+
+    #[derive(Clone, Copy)]
+    enum HashKind {
+        Sha256,
+        Sha384,
+        Sha512,
+    }
+
+    /// Cryptographically bind the submitted PCR values to the signed quote.
+    ///
+    /// Extracts `pcrSelect` + `pcrDigest` from the marshaled `TPMS_ATTEST`
+    /// (`quote_bytes`), re-hashes `submitted_pcrs` using the TPM's exact
+    /// concatenation layout (selected indices, ascending, concatenated, then
+    /// hashed with the bank's algorithm), and compares against the quote's
+    /// `pcrDigest`. Fails closed on any parse error, missing value, length
+    /// mismatch, or algorithm disagreement.
+    ///
+    /// SINGLE-BANK CONTRACT: `AttestationSession::quote` produces single-bank
+    /// SHA-256 selections, so this verifier accepts exactly one
+    /// `TPMS_PCR_SELECTION` and rejects multi-bank quotes fail-closed. This
+    /// avoids the spec-ambiguous multi-bank `pcrDigest` path entirely.
+    ///
+    /// NOTE (flagged per "call it out" rule): for a single-bank quote the
+    /// `pcrDigest` is hashed with the PCR bank's algorithm — this is what
+    /// real TPMs emit and what `tpm2_checkquote` recomputes. If a target TPM
+    /// instead hashes `pcrDigest` with the quote-signature scheme's algorithm
+    /// and the two differ, this binding must be reconciled. Our session keeps
+    /// them identical (SHA-256 bank, ECDSA-P256/SHA-256 signing), so they agree.
+    pub fn verify_pcr_binding(
+        quote_bytes: &[u8],
+        submitted_pcrs: &[crate::attestation::PcrValue],
+    ) -> Result<(), crate::attestation::AttestError> {
+        use crate::attestation::AttestError;
+
+        let mut r = Reader(quote_bytes);
+        // magic
+        if r.take(4)? != super::TPM_GENERATED_MAGIC {
+            return Err(AttestError::VerificationFailed);
+        }
+        // type must be TPM_ST_ATTEST_QUOTE
+        if r.u16()? != TPM_ST_ATTEST_QUOTE {
+            return Err(AttestError::VerificationFailed);
+        }
+        // qualifiedSigner: TPM2B_NAME — skip
+        let qs_len = r.u16()? as usize;
+        r.skip(qs_len)?;
+        // extraData: TPM2B_DATA — skip (nonce binding is verify_quote_structure's job)
+        let ed_len = r.u16()? as usize;
+        r.skip(ed_len)?;
+        // clockInfo: clock(8) + resetCount(4) + restartCount(4) + safe(1) = 17
+        r.skip(17)?;
+        // firmwareVersion(8)
+        r.skip(8)?;
+        // attested = TPMS_QUOTE_INFO → pcrSelect: TPML_PCR_SELECTION
+        let count = r.u32()?;
+        if count != 1 {
+            // single-bank only (see contract note)
+            return Err(AttestError::VerificationFailed);
+        }
+        let hash_alg = r.u16()?;
+        let sizeof_select = r.u8()? as usize;
+        if sizeof_select == 0 || sizeof_select > 4 {
+            return Err(AttestError::VerificationFailed);
+        }
+        let select_bitmap = r.take(sizeof_select)?.to_vec();
+        // pcrDigest: TPM2B_DIGEST
+        let digest_len = r.u16()? as usize;
+        let pcr_digest = r.take(digest_len)?;
+
+        let (digest_size, kind) = match hash_alg {
+            TPM_ALG_SHA256 => (32usize, HashKind::Sha256),
+            TPM_ALG_SHA384 => (48, HashKind::Sha384),
+            TPM_ALG_SHA512 => (64, HashKind::Sha512),
+            // SHA-1 / SM3 / unknown → not supported, fail closed.
+            _ => return Err(AttestError::VerificationFailed),
+        };
+
+        // Selected PCR indices, ascending, from the bitmap.
+        let mut selected: Vec<u8> = Vec::new();
+        for (byte_i, &bitmap_byte) in select_bitmap.iter().enumerate() {
+            for bit in 0..8 {
+                if bitmap_byte & (1 << bit) != 0 {
+                    selected.push((byte_i * 8 + bit) as u8);
+                }
+            }
+        }
+
+        // Concatenate submitted digests in selection order; every selected
+        // index MUST be present with the matching algorithm and length.
+        let mut concat = Vec::with_capacity(selected.len() * digest_size);
+        for idx in &selected {
+            let pv = submitted_pcrs
+                .iter()
+                .find(|p| p.index == *idx && p.hash_algorithm == hash_alg)
+                .ok_or(AttestError::VerificationFailed)?;
+            if pv.digest.len() != digest_size {
+                return Err(AttestError::VerificationFailed);
+            }
+            concat.extend_from_slice(&pv.digest);
+        }
+
+        let computed = hash_with(kind, &concat);
+        if !crate::attestation::ct_eq(&computed, pcr_digest) {
+            return Err(AttestError::VerificationFailed);
+        }
+        Ok(())
+    }
+
+    fn hash_with(kind: HashKind, data: &[u8]) -> Vec<u8> {
+        use sha2::Digest;
+        match kind {
+            HashKind::Sha256 => {
+                let mut h = sha2::Sha256::new();
+                h.update(data);
+                h.finalize().to_vec()
+            }
+            HashKind::Sha384 => {
+                let mut h = sha2::Sha384::new();
+                h.update(data);
+                h.finalize().to_vec()
+            }
+            HashKind::Sha512 => {
+                let mut h = sha2::Sha512::new();
+                h.update(data);
+                h.finalize().to_vec()
+            }
+        }
+    }
 }
 
 #[cfg(feature = "software-quote-verify")]
 pub use software::verify_quote_signature;
+
+#[cfg(feature = "software-quote-verify")]
+pub use software::verify_pcr_binding;
+
+#[cfg(all(test, feature = "software-quote-verify"))]
+mod pcr_binding_tests {
+    use crate::attestation::PcrValue;
+    use crate::attestation::quote::software::verify_pcr_binding;
+
+    fn sha256(data: &[u8]) -> Vec<u8> {
+        use sha2::Digest;
+        let mut h = sha2::Sha256::new();
+        h.update(data);
+        h.finalize().to_vec()
+    }
+
+    /// Build a minimal valid TPMS_ATTEST of type TPM_ST_ATTEST_QUOTE selecting
+    /// PCRs {0,7,9} (SHA-256) with the given per-PCR digests.
+    fn build_quote(pcr0: &[u8; 32], pcr7: &[u8; 32], pcr9: &[u8; 32], nonce: &[u8]) -> Vec<u8> {
+        let mut q = Vec::new();
+        q.extend_from_slice(&[0xff, 0x54, 0x43, 0x47]); // magic
+        q.extend_from_slice(&0x8018u16.to_be_bytes()); // TPM_ST_ATTEST_QUOTE
+        q.extend_from_slice(&0u16.to_be_bytes()); // qualifiedSigner len=0
+        q.extend_from_slice(&(nonce.len() as u16).to_be_bytes()); // extraData
+        q.extend_from_slice(nonce);
+        q.extend_from_slice(&[0u8; 17]); // clockInfo
+        q.extend_from_slice(&[0u8; 8]); // firmwareVersion
+        // TPMS_QUOTE_INFO.pcrSelect (single SHA-256 selection, PCRs 0,7,9)
+        q.extend_from_slice(&1u32.to_be_bytes()); // count = 1
+        q.extend_from_slice(&0x000Bu16.to_be_bytes()); // SHA-256
+        q.push(3); // sizeofSelect
+        // bitmap: PCR0 → byte0 bit0, PCR7 → byte0 bit7, PCR9 → byte1 bit1
+        q.extend_from_slice(&[0x81, 0x02, 0x00]);
+        // pcrDigest = SHA-256(pcr0 || pcr7 || pcr9)
+        let mut concat = Vec::new();
+        concat.extend_from_slice(pcr0);
+        concat.extend_from_slice(pcr7);
+        concat.extend_from_slice(pcr9);
+        let digest = sha256(&concat);
+        q.extend_from_slice(&(digest.len() as u16).to_be_bytes());
+        q.extend_from_slice(&digest);
+        q
+    }
+
+    fn submitted(pcr0: &[u8; 32], pcr7: &[u8; 32], pcr9: &[u8; 32]) -> Vec<PcrValue> {
+        vec![
+            PcrValue {
+                index: 0,
+                hash_algorithm: 0x000B,
+                digest: pcr0.to_vec(),
+            },
+            PcrValue {
+                index: 7,
+                hash_algorithm: 0x000B,
+                digest: pcr7.to_vec(),
+            },
+            PcrValue {
+                index: 9,
+                hash_algorithm: 0x000B,
+                digest: pcr9.to_vec(),
+            },
+        ]
+    }
+
+    #[test]
+    fn binding_holds_for_matching_values() {
+        let (p0, p7, p9) = ([1u8; 32], [2u8; 32], [3u8; 32]);
+        let quote = build_quote(&p0, &p7, &p9, &[0xAA; 32]);
+        assert!(verify_pcr_binding(&quote, &submitted(&p0, &p7, &p9)).is_ok());
+    }
+
+    #[test]
+    fn binding_rejects_tampered_pcr_value() {
+        let (p0, p7, p9) = ([1u8; 32], [2u8; 32], [3u8; 32]);
+        let quote = build_quote(&p0, &p7, &p9, &[0xAA; 32]);
+        // Attacker claims a different PCR9 than the quote actually covers.
+        let bad_p9 = [0xFFu8; 32];
+        assert!(verify_pcr_binding(&quote, &submitted(&p0, &p7, &bad_p9)).is_err());
+    }
+
+    #[test]
+    fn binding_rejects_missing_selected_pcr() {
+        let (p0, p7, p9) = ([1u8; 32], [2u8; 32], [3u8; 32]);
+        let quote = build_quote(&p0, &p7, &p9, &[0xAA; 32]);
+        // Drop PCR7 — the quote selects it, so the binding must fail.
+        let mut s = submitted(&p0, &p7, &p9);
+        s.retain(|p| p.index != 7);
+        assert!(verify_pcr_binding(&quote, &s).is_err());
+    }
+
+    #[test]
+    fn binding_rejects_wrong_algorithm_claim() {
+        let (p0, p7, p9) = ([1u8; 32], [2u8; 32], [3u8; 32]);
+        let quote = build_quote(&p0, &p7, &p9, &[0xAA; 32]);
+        let mut s = submitted(&p0, &p7, &p9);
+        s[1].hash_algorithm = 0x000C; // claim SHA-384 for PCR7
+        assert!(verify_pcr_binding(&quote, &s).is_err());
+    }
+
+    #[test]
+    fn binding_rejects_truncated_or_garbage_quote() {
+        assert!(verify_pcr_binding(&[], &[]).is_err());
+        assert!(verify_pcr_binding(&[0xff, 0x54, 0x43, 0x47], &[]).is_err());
+        // Bad magic.
+        let mut q = build_quote(&[1; 32], &[2; 32], &[3; 32], &[0xAA; 32]);
+        q[0] = 0x00;
+        assert!(verify_pcr_binding(&q, &submitted(&[1; 32], &[2; 32], &[3; 32])).is_err());
+    }
+
+    #[test]
+    fn extra_unselected_pcrs_are_ignored() {
+        let (p0, p7, p9) = ([1u8; 32], [2u8; 32], [3u8; 32]);
+        let quote = build_quote(&p0, &p7, &p9, &[0xAA; 32]);
+        let mut s = submitted(&p0, &p7, &p9);
+        // PCR 12 is submitted but not selected — must not break the binding.
+        s.push(PcrValue {
+            index: 12,
+            hash_algorithm: 0x000B,
+            digest: vec![9; 32],
+        });
+        assert!(verify_pcr_binding(&quote, &s).is_ok());
+    }
+}
