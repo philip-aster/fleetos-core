@@ -26,19 +26,6 @@ pub struct TpmQuote {
     pub attestation_key_pub: Vec<u8>,
 }
 
-/// An Apple Secure Enclave attestation submission (operator/fleetctl-proxy path).
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct AppleSeAttestation {
-    /// Attestation data from the Secure Enclave.
-    pub attestation_data: Vec<u8>,
-    /// The nonce bound into this attestation.
-    pub nonce: Vec<u8>,
-    /// The device's public key (for verification).
-    pub device_public_key: Vec<u8>,
-    /// Optional DCOS (DeviceCheck) attestation token.
-    pub dcos_token: Option<Vec<u8>>,
-}
-
 /// TPM_GENERATED_VALUE magic: 0xff 'T' 'C' 'G'. Every TPMS_ATTEST begins with it.
 const TPM_GENERATED_MAGIC: [u8; 4] = [0xff, 0x54, 0x43, 0x47];
 
@@ -66,20 +53,6 @@ pub fn verify_quote_structure(quote: &TpmQuote, expected_nonce: &[u8]) -> Result
         return Err(AttestError::VerificationFailed);
     }
     if quote.signature.is_empty() {
-        return Err(AttestError::VerificationFailed);
-    }
-    Ok(())
-}
-
-/// Apple SE structural verification: nonce binding + non-empty fields.
-pub fn verify_apple_se_structure(
-    att: &AppleSeAttestation,
-    expected_nonce: &[u8],
-) -> Result<(), AttestError> {
-    if att.nonce != expected_nonce {
-        return Err(AttestError::VerificationFailed);
-    }
-    if att.attestation_data.is_empty() || att.device_public_key.is_empty() {
         return Err(AttestError::VerificationFailed);
     }
     Ok(())
