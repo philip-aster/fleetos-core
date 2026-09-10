@@ -136,20 +136,7 @@ message SecretAclChange {
   string spiffe_id = 3;
 }
 
-// ================= CR-2: delegated signing =================
-
-message DelegatedKeyRequest {
-  string node_svid = 1;
-  string target_spiffe_id = 2;
-  optional uint32 target_ordinal = 3; // absent = role-level renewal scope
-  uint64 requested_ttl_secs = 4;      // upper bound; control may grant less
-}
-
-message DelegatedKeyResponse {
-  bytes delegation_id = 1;  // 16-byte DelegationId
-  bytes key_material = 2;   // opaque; control's postcard shadow-struct format
-  uint64 expires_at_unix = 3;
-}
+// CR-16: RequestDelegatedKey resolves via import "state.proto" (node-callable path), but remains here for operator override.
 
 // ================= CR-2: workload lifecycle =================
 

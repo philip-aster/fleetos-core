@@ -51,10 +51,28 @@ pub mod state {
     // (precedent: provisioning module).
     pub use crate::proto::fleetos::workload_status_service_client::WorkloadStatusServiceClient;
     pub use crate::proto::fleetos::workload_status_service_server::WorkloadStatusService;
+
+    // CR-16: Node-callable delegation acquisition exports
+    pub use crate::proto::fleetos::delegation_service_client::DelegationServiceClient;
+    pub use crate::proto::fleetos::delegation_service_server::DelegationService;
+
     pub use crate::proto::fleetos::{
-        PeerSelector, RouteEntry, RouteUpdate, SagRule, SagUpdate, ScheduleUpdate,
-        SecretRotationNotification, StatusAck, SvidRotationNotification, WatchEvent, WatchRequest,
-        WorkloadAssignment, WorkloadStatusReport,
+        // CR-16: Re-exported from state.proto for node-facing services
+        DelegatedKeyRequest,
+        DelegatedKeyResponse,
+        PeerSelector,
+        RouteEntry,
+        RouteUpdate,
+        SagRule,
+        SagUpdate,
+        ScheduleUpdate,
+        SecretRotationNotification,
+        StatusAck,
+        SvidRotationNotification,
+        WatchEvent,
+        WatchRequest,
+        WorkloadAssignment,
+        WorkloadStatusReport,
     };
 }
 

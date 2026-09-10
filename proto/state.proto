@@ -127,3 +127,29 @@ message WorkloadStatusReport {
 message StatusAck {
   bool accepted = 1;
 }
+
+// CR-16 (3b resolution, Option 1): node-callable delegation acquisition.
+// Served on the Data/Control listener. Authorization is enforced
+// server-side: the mTLS caller MUST equal node_svid.
+// AdminService.RequestDelegatedKey remains the operator override path.
+service DelegationService {
+  rpc RequestDelegatedKey(DelegatedKeyRequest) returns (DelegatedKeyResponse);
+}
+
+// ================= CR-16: delegated signing =================
+message DelegatedKeyRequest {
+  string node_svid = 1;
+  string target_spiffe_id = 2;
+  optional uint32 target_ordinal = 3; // absent = role-level renewal scope
+  uint64 requested_ttl_secs = 4;      // upper bound; control may grant less
+}
+
+message DelegatedKeyResponse {
+  // Variable-length UTF-8 string bytes representing the composite key:
+  // "{node_id}|{target_svid_id}|{target_ordinal_or_none}|{issued_at_unix}"
+  // (Note: NOT the 16-byte BLAKE3 hash defined in fleetos-core::spiffe::DelegationId).
+  bytes delegation_id = 1;
+
+  bytes key_material = 2;   // opaque; control's postcard shadow-struct format
+  uint64 expires_at_unix = 3;
+}
