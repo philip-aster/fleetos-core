@@ -71,6 +71,9 @@ pub mod software {
     const TPM_ALG_ECC: u16 = 0x0023;
     /// TPMI_ALG_NULL — expected for the `symmetric` block of a signing-only AK.
     const TPM_ALG_NULL: u16 = 0x0010;
+    /// Scheme selectors that carry extra parameters we must consume.
+    const TPM_ALG_OAEP: u16 = 0x0017;
+    const TPM_ALG_ECDAA: u16 = 0x001A;
 
     /// Parsed AK public key (signing material only).
     enum AkPublic {
@@ -119,7 +122,17 @@ pub mod software {
         match typ {
             TPM_ALG_RSA => {
                 expect_null_symmetric(&mut r)?;
-                let _scheme = r.u16()?;
+                // TPMT_RSA_SCHEME: NULL has no params; RSASSA/PSS/RSAES/OAEP carry
+                // a hashAlg (OAEP also carries a label TPM2B). Consume them so the
+                // trailing keyBits/exponent/unique stay aligned.
+                let scheme = r.u16()?;
+                if scheme != TPM_ALG_NULL {
+                    let _scheme_hash = r.u16()?;
+                    if scheme == TPM_ALG_OAEP {
+                        let label_len = r.u16()? as usize;
+                        r.skip(label_len)?;
+                    }
+                }
                 let _key_bits = r.u16()?;
                 let exponent_raw = r.u32()?;
                 // TPM encodes default exponent 65537 as 0.
@@ -134,9 +147,23 @@ pub mod software {
             }
             TPM_ALG_ECC => {
                 expect_null_symmetric(&mut r)?;
-                let _scheme = r.u16()?;
+                // TPMT_ECC_SCHEME: NULL has no params; signing schemes (ECDSA,
+                // ECSCHNORR, ...) carry a hashAlg; ECDAA additionally carries a
+                // count. A real TPM marshals the full scheme, so consuming only
+                // the selector would shift curveID/kdf/unique and corrupt x/y.
+                let scheme = r.u16()?;
+                if scheme != TPM_ALG_NULL {
+                    let _scheme_hash = r.u16()?;
+                    if scheme == TPM_ALG_ECDAA {
+                        let _ecdaa_count = r.u16()?;
+                    }
+                }
                 let _curve_id = r.u16()?;
-                let _kdf = r.u16()?;
+                // TPMT_KDF_SCHEME: NULL has no params; MGF1/KDF* carry a hashAlg.
+                let kdf = r.u16()?;
+                if kdf != TPM_ALG_NULL {
+                    let _kdf_hash = r.u16()?;
+                }
                 let x_len = r.u16()? as usize;
                 let x = r.take(x_len)?.to_vec();
                 let y_len = r.u16()? as usize;
@@ -365,6 +392,61 @@ pub mod software {
                 let mut h = sha2::Sha512::new();
                 h.update(data);
                 h.finalize().to_vec()
+            }
+        }
+    }
+
+    #[cfg(test)]
+    mod ak_pub_parse_tests {
+        use super::*;
+
+        /// Marshaled TPMT_PUBLIC (ECC). `scheme_with_hash` selects the real-TPM
+        /// ECDSA(SHA-256) layout (scheme carries hashAlg) vs the NULL-scheme layout.
+        fn build_ecc_tpmt_public(scheme_with_hash: bool) -> (Vec<u8>, Vec<u8>, Vec<u8>) {
+            let x = vec![0x11u8; 32];
+            let y = vec![0x22u8; 32];
+            let mut b = Vec::new();
+            b.extend_from_slice(&0x0023u16.to_be_bytes()); // type = ECC
+            b.extend_from_slice(&0x000Bu16.to_be_bytes()); // nameAlg = SHA-256
+            b.extend_from_slice(&0x00050072u32.to_be_bytes()); // objectAttributes
+            b.extend_from_slice(&0x0000u16.to_be_bytes()); // authPolicy len = 0
+            b.extend_from_slice(&0x0010u16.to_be_bytes()); // symmetric = NULL
+            if scheme_with_hash {
+                b.extend_from_slice(&0x0018u16.to_be_bytes()); // scheme = ECDSA
+                b.extend_from_slice(&0x000Bu16.to_be_bytes()); // scheme hashAlg = SHA-256
+            } else {
+                b.extend_from_slice(&0x0010u16.to_be_bytes()); // scheme = NULL
+            }
+            b.extend_from_slice(&0x0003u16.to_be_bytes()); // curveID = NIST_P256
+            b.extend_from_slice(&0x0010u16.to_be_bytes()); // kdf = NULL
+            b.extend_from_slice(&(x.len() as u16).to_be_bytes());
+            b.extend_from_slice(&x);
+            b.extend_from_slice(&(y.len() as u16).to_be_bytes());
+            b.extend_from_slice(&y);
+            (b, x, y)
+        }
+
+        #[test]
+        fn parses_real_tpm_ecdsa_scheme_layout() {
+            let (bytes, x, y) = build_ecc_tpmt_public(true);
+            match parse_ak_public(&bytes).expect("real TPM ECDSA layout must parse") {
+                AkPublic::Ecc { x: px, y: py } => {
+                    assert_eq!(px, x);
+                    assert_eq!(py, y);
+                }
+                _ => panic!("expected ECC public"),
+            }
+        }
+
+        #[test]
+        fn parses_null_scheme_layout() {
+            let (bytes, x, y) = build_ecc_tpmt_public(false);
+            match parse_ak_public(&bytes).expect("null-scheme layout must parse") {
+                AkPublic::Ecc { x: px, y: py } => {
+                    assert_eq!(px, x);
+                    assert_eq!(py, y);
+                }
+                _ => panic!("expected ECC public"),
             }
         }
     }

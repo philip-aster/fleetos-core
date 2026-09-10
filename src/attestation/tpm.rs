@@ -61,23 +61,19 @@ pub fn make_credential(
     secret: &[u8; 32],
 ) -> Result<(Vec<u8>, Vec<u8>), TssError> {
     let mut context = create_context(endpoint)?;
-
     let ek_public = spki_to_tpm_public(ek_spki_der)?;
-    let ak_public = unmarshal_ak_public(ak_pub)?;
 
-    let ek_sensitive = empty_sensitive_for(&ek_public)?;
+    // The AK's Name is nameAlg || H(TPMT_PUBLIC) — a remote verifier needs
+    // no TPM access to derive it, and MakeCredential binds the credential
+    // to this Name. Loading the AK into the server TPM is unnecessary.
+    let ak_name = compute_ak_name(ak_pub)?;
+
+    // External public keys go into the Null hierarchy: they are not descendants of
+    // this TPM's hierarchy primaries. load_external_public passes a true null
+    // pointer for inPrivate, signaling a public-only load to the TPM.
     let ek_handle = context
-        .load_external(ek_sensitive, ek_public, Hierarchy::Endorsement)
+        .load_external_public(ek_public, Hierarchy::Null)
         .map_err(|e| TssError::Esapi(format!("load EK failed: {}", e)))?;
-
-    let ak_sensitive = empty_sensitive_for(&ak_public)?;
-    let ak_handle = context
-        .load_external(ak_sensitive, ak_public, Hierarchy::Null)
-        .map_err(|e| TssError::Esapi(format!("load AK failed: {}", e)))?;
-
-    let ak_name: Name = context
-        .tr_get_name(ak_handle.into())
-        .map_err(|e| TssError::Esapi(format!("get AK name failed: {}", e)))?;
 
     let credential = Digest::try_from(secret.to_vec())
         .map_err(|e| TssError::Esapi(format!("digest failed: {}", e)))?;
@@ -89,13 +85,59 @@ pub fn make_credential(
     Ok((id_object.value().to_vec(), enc_secret.value().to_vec()))
 }
 
+/// Canonical TPM Name of an object from its marshaled TPMT_PUBLIC:
+/// `nameAlg || H(TPMT_PUBLIC)` (TPM 2.0 Part 1 §16), where `H` is the hash
+/// algorithm named by the `nameAlg` field embedded in the TPMT_PUBLIC itself.
+///
+/// Reads `nameAlg` from the TPMT_PUBLIC rather than assuming SHA-256, so the
+/// Name stays correct even if the AK template's `name_hashing_algorithm`
+/// changes. Hashes across the SHA-2 family (available via `sha2`); anything
+/// we cannot hash (SHA-1, SM3, SHA-3) or any unknown value fails closed.
+fn compute_ak_name(tpmt_public: &[u8]) -> Result<Name, TssError> {
+    use sha2::Digest;
+
+    // TPMT_PUBLIC layout: type(2) nameAlg(2) objectAttributes(4) authPolicy(2+n) ...
+    // Need at least type(2) + nameAlg(2) to read the nameAlg.
+    if tpmt_public.len() < 4 {
+        return Err(TssError::InvalidAk(
+            "TPMT_PUBLIC too short to contain nameAlg".to_owned(),
+        ));
+    }
+    let name_alg = u16::from_be_bytes([tpmt_public[2], tpmt_public[3]]);
+
+    // Dispatch on the embedded nameAlg. Fleet config is SHA-256 (ak_template),
+    // but we handle the full SHA-2 family so a template change within that
+    // family stays correct; everything else fails closed.
+    let digest: Vec<u8> = match name_alg {
+        0x000B => sha2::Sha256::digest(tpmt_public).to_vec(), // TPM_ALG_SHA256
+        0x000C => sha2::Sha384::digest(tpmt_public).to_vec(), // TPM_ALG_SHA384
+        0x000D => sha2::Sha512::digest(tpmt_public).to_vec(), // TPM_ALG_SHA512
+        0x0004 => {
+            return Err(TssError::InvalidAk(
+                "unsupported nameAlg SHA-1 (0x0004): fleet requires a SHA-2 nameAlg".to_owned(),
+            ));
+        }
+        other => {
+            return Err(TssError::InvalidAk(format!(
+                "unsupported or unknown nameAlg 0x{:04X}",
+                other
+            )));
+        }
+    };
+
+    let mut name = Vec::with_capacity(2 + digest.len());
+    name.extend_from_slice(&name_alg.to_be_bytes());
+    name.extend_from_slice(&digest);
+    Name::try_from(name).map_err(|e| TssError::InvalidAk(format!("AK name: {}", e)))
+}
+
 /// Convert an EK public key in SPKI DER (RFC 5280) to a tss-esapi `Public`.
 fn spki_to_tpm_public(spki_der: &[u8]) -> Result<tss_esapi::structures::Public, TssError> {
     use spki::SubjectPublicKeyInfoRef;
     use spki::der::Decode;
     use tss_esapi::attributes::ObjectAttributes;
-    use tss_esapi::interface_types::algorithm::HashingAlgorithm;
-    use tss_esapi::interface_types::key_bits::RsaKeyBits;
+    use tss_esapi::interface_types::algorithm::{HashingAlgorithm, SymmetricMode};
+    use tss_esapi::interface_types::key_bits::{AesKeyBits, RsaKeyBits};
     use tss_esapi::structures::{
         Public, PublicKeyRsa, PublicRsaParameters, RsaExponent, RsaScheme,
         SymmetricDefinitionObject,
@@ -127,9 +169,6 @@ fn spki_to_tpm_public(spki_der: &[u8]) -> Result<tss_esapi::structures::Public, 
     };
 
     let object_attributes = ObjectAttributes::builder()
-        .with_fixed_tpm(true)
-        .with_fixed_parent(true)
-        .with_admin_with_policy(true)
         .with_restricted(true)
         .with_decrypt(true)
         .build()
@@ -140,7 +179,10 @@ fn spki_to_tpm_public(spki_der: &[u8]) -> Result<tss_esapi::structures::Public, 
         name_hashing_algorithm: HashingAlgorithm::Sha256,
         auth_policy: Default::default(),
         parameters: PublicRsaParameters::new(
-            SymmetricDefinitionObject::Null,
+            SymmetricDefinitionObject::Aes {
+                key_bits: AesKeyBits::Aes128,
+                mode: SymmetricMode::Cfb,
+            },
             RsaScheme::Null,
             key_bits,
             RsaExponent::try_from(exponent)
@@ -148,26 +190,6 @@ fn spki_to_tpm_public(spki_der: &[u8]) -> Result<tss_esapi::structures::Public, 
         ),
         unique: PublicKeyRsa::try_from(modulus)
             .map_err(|e| TssError::InvalidEk(format!("modulus: {}", e)))?,
-    })
-}
-
-/// Unmarshal the AK public key (TPM2B_PUBLIC bytes) into a tss-esapi `Public`.
-fn unmarshal_ak_public(ak_pub: &[u8]) -> Result<tss_esapi::structures::Public, TssError> {
-    use tss_esapi::tss2_esys::{TPM2B_PUBLIC, Tss2_MU_TPM2B_PUBLIC_Unmarshal};
-
-    let mut dest: TPM2B_PUBLIC = unsafe { std::mem::zeroed() };
-    let mut offset: u64 = 0;
-    let rc = unsafe {
-        Tss2_MU_TPM2B_PUBLIC_Unmarshal(ak_pub.as_ptr(), ak_pub.len() as u64, &mut offset, &mut dest)
-    };
-    if rc != 0 {
-        return Err(TssError::InvalidAk(format!(
-            "TPM2B_PUBLIC unmarshal failed, rc={:#x}",
-            rc
-        )));
-    }
-    tss_esapi::structures::Public::try_from(dest).map_err(|e| {
-        TssError::InvalidAk(format!("TPM2B_PUBLIC -> Public conversion failed: {}", e))
     })
 }
 
@@ -208,29 +230,6 @@ fn parse_rsa_public_key(der: &[u8]) -> Result<(Vec<u8>, u32), TssError> {
     }
 
     Ok((modulus, exponent))
-}
-
-/// Build a structurally-valid but empty `Sensitive` for a public-only
-/// `load_external`.
-fn empty_sensitive_for(
-    public: &tss_esapi::structures::Public,
-) -> Result<tss_esapi::structures::Sensitive, TssError> {
-    use tss_esapi::structures::{Public, Sensitive};
-    match public {
-        Public::Rsa { .. } => Ok(Sensitive::Rsa {
-            auth_value: Default::default(),
-            seed_value: Default::default(),
-            sensitive: Default::default(),
-        }),
-        Public::Ecc { .. } => Ok(Sensitive::Ecc {
-            auth_value: Default::default(),
-            seed_value: Default::default(),
-            sensitive: Default::default(),
-        }),
-        _ => Err(TssError::InvalidEk(
-            "unsupported EK/AK key type for load_external".to_owned(),
-        )),
-    }
 }
 
 fn parse_der_length(bytes: &[u8]) -> Result<(usize, usize), TssError> {
@@ -281,7 +280,9 @@ impl AttestationSession {
 
         let ek_public = ek_template()?;
         let ek_result = context
-            .create_primary(Hierarchy::Endorsement, ek_public, None, None, None, None)
+            .execute_with_nullauth_session(|ctx| {
+                ctx.create_primary(Hierarchy::Endorsement, ek_public, None, None, None, None)
+            })
             .map_err(|e| TssError::Esapi(format!("create EK primary failed: {}", e)))?;
         let ek_handle = ek_result.key_handle;
 
@@ -290,7 +291,9 @@ impl AttestationSession {
 
         let ak_public = ak_template()?;
         let ak_result = context
-            .create_primary(Hierarchy::Endorsement, ak_public, None, None, None, None)
+            .execute_with_nullauth_session(|ctx| {
+                ctx.create_primary(Hierarchy::Endorsement, ak_public, None, None, None, None)
+            })
             .map_err(|e| TssError::Esapi(format!("create AK primary failed: {}", e)))?;
         let ak_handle = ak_result.key_handle;
 
@@ -330,17 +333,84 @@ impl AttestationSession {
     }
 
     pub fn activate(&mut self, credential_blob: &[u8], secret: &[u8]) -> Result<Vec<u8>, TssError> {
-        use tss_esapi::structures::{EncryptedSecret, IdObject};
+        use tss_esapi::constants::SessionType;
+        use tss_esapi::interface_types::algorithm::{HashingAlgorithm, SymmetricMode};
+        use tss_esapi::interface_types::key_bits::AesKeyBits;
+        use tss_esapi::interface_types::resource_handles::Hierarchy;
+        use tss_esapi::interface_types::session_handles::AuthSession;
+        use tss_esapi::structures::{
+            Digest, EncryptedSecret, IdObject, Nonce, SymmetricDefinition,
+        };
 
         let id_object = IdObject::try_from(credential_blob.to_vec())
             .map_err(|e| TssError::Esapi(format!("bad credentialBlob: {}", e)))?;
         let enc_secret = EncryptedSecret::try_from(secret.to_vec())
             .map_err(|e| TssError::Esapi(format!("bad secret: {}", e)))?;
+        let ak_handle = self.ak_handle;
+        let ek_handle = self.ek_handle;
+
+        // 1. Start a policy session for the EK (Template L-1 authPolicy).
+        let ek_policy_auth_session = self
+            .context
+            .start_auth_session(
+                None,
+                None,
+                None,
+                SessionType::Policy,
+                SymmetricDefinition::Aes {
+                    key_bits: AesKeyBits::Aes128,
+                    mode: SymmetricMode::Cfb,
+                },
+                HashingAlgorithm::Sha256,
+            )
+            .map_err(|e| TssError::Esapi(format!("start ek policy session: {}", e)))?
+            .ok_or_else(|| TssError::Esapi("failed to allocate ek policy session".into()))?;
+
+        // 2. Convert AuthSession → PolicySession for policy_secret.
+        let ek_policy_session =
+            ek_policy_auth_session
+                .try_into()
+                .map_err(|e: tss_esapi::Error| {
+                    TssError::Esapi(format!("policy session convert: {}", e))
+                })?;
+
+        // 3. Satisfy the EK's authPolicy: PolicySecret(TPM_RH_ENDORSEMENT).
+        let endorsement_auth: tss_esapi::handles::AuthHandle =
+            tss_esapi::handles::ObjectHandle::from(Hierarchy::Endorsement).into();
+
+        self.context
+            .execute_with_nullauth_session(|ctx| {
+                ctx.policy_secret(
+                    ek_policy_session,
+                    endorsement_auth,
+                    Nonce::default(),
+                    Digest::default(),
+                    Nonce::default(),
+                    None,
+                )
+            })
+            .map_err(|e| TssError::Esapi(format!("policy secret failed: {}", e)))?;
+
+        // 4. Set sessions for ActivateCredential:
+        //    Session 1 (AK): Password (userWithAuth=true, empty authValue).
+        //    Session 2 (EK): The satisfied policy session.
+        self.context.set_sessions((
+            Some(AuthSession::Password),
+            Some(ek_policy_auth_session),
+            None,
+        ));
 
         let recovered = self
             .context
-            .activate_credential(self.ak_handle, self.ek_handle, id_object, enc_secret)
+            .activate_credential(ak_handle, ek_handle, id_object, enc_secret)
             .map_err(|e| TssError::Esapi(format!("activate_credential failed: {}", e)))?;
+
+        // SECURITY/STABILITY: Clear sessions to flush the EK policy session from
+        // the TPM. Failing to do so leaks TPM session handles (causing
+        // TPM2_RC_SESSION_HANDLES / 0x98B on subsequent operations) and leaves
+        // the context in a confused state that breaks TPM2_Quote's auth session.
+        self.context.set_sessions((None, None, None));
+
         Ok(recovered.value().to_vec())
     }
 
@@ -354,10 +424,7 @@ impl AttestationSession {
 
         let slots: Vec<PcrSlot> = pcr_indices
             .iter()
-            .map(|&i| {
-                PcrSlot::try_from(i as u32)
-                    .map_err(|e| TssError::Esapi(format!("bad PCR slot {}: {}", i, e)))
-            })
+            .map(|&i| pcr_slot_from_index(i))
             .collect::<Result<Vec<_>, _>>()?;
 
         let selection = PcrSelectionListBuilder::new()
@@ -370,9 +437,12 @@ impl AttestationSession {
             .try_into()
             .map_err(|e| TssError::Esapi(format!("bad nonce: {}", e)))?;
 
+        let ak_handle = self.ak_handle;
         let (attest, signature) = self
             .context
-            .quote(self.ak_handle, qualifying, SignatureScheme::Null, selection)
+            .execute_with_nullauth_session(move |ctx| {
+                ctx.quote(ak_handle, qualifying, SignatureScheme::Null, selection)
+            })
             .map_err(|e| TssError::Esapi(format!("TPM2_Quote failed: {}", e)))?;
 
         let quote_bytes = attest
@@ -394,10 +464,7 @@ impl AttestationSession {
 
         let slots: Vec<PcrSlot> = pcr_indices
             .iter()
-            .map(|&i| {
-                PcrSlot::try_from(i as u32)
-                    .map_err(|e| TssError::Esapi(format!("bad PCR slot {}: {}", i, e)))
-            })
+            .map(|&i| pcr_slot_from_index(i))
             .collect::<Result<Vec<_>, _>>()?;
 
         let selection = PcrSelectionListBuilder::new()
@@ -422,6 +489,46 @@ impl AttestationSession {
             }
         }
         Ok(out)
+    }
+}
+
+/// Map a PCR index (0–23) to the tss-esapi `PcrSlot` variant.
+///
+/// Deliberately avoids `PcrSlot::try_from`: the `TryFrom<u32>` impl in
+/// tss-esapi 7.7.0 rejects index 0 at runtime ("the provided parameter is
+/// invalid for that type"), and the enum-literal mapping is immune to any
+/// future conversion-trait drift.
+fn pcr_slot_from_index(i: u8) -> Result<tss_esapi::structures::PcrSlot, TssError> {
+    use tss_esapi::structures::PcrSlot;
+    match i {
+        0 => Ok(PcrSlot::Slot0),
+        1 => Ok(PcrSlot::Slot1),
+        2 => Ok(PcrSlot::Slot2),
+        3 => Ok(PcrSlot::Slot3),
+        4 => Ok(PcrSlot::Slot4),
+        5 => Ok(PcrSlot::Slot5),
+        6 => Ok(PcrSlot::Slot6),
+        7 => Ok(PcrSlot::Slot7),
+        8 => Ok(PcrSlot::Slot8),
+        9 => Ok(PcrSlot::Slot9),
+        10 => Ok(PcrSlot::Slot10),
+        11 => Ok(PcrSlot::Slot11),
+        12 => Ok(PcrSlot::Slot12),
+        13 => Ok(PcrSlot::Slot13),
+        14 => Ok(PcrSlot::Slot14),
+        15 => Ok(PcrSlot::Slot15),
+        16 => Ok(PcrSlot::Slot16),
+        17 => Ok(PcrSlot::Slot17),
+        18 => Ok(PcrSlot::Slot18),
+        19 => Ok(PcrSlot::Slot19),
+        20 => Ok(PcrSlot::Slot20),
+        21 => Ok(PcrSlot::Slot21),
+        22 => Ok(PcrSlot::Slot22),
+        23 => Ok(PcrSlot::Slot23),
+        other => Err(TssError::Esapi(format!(
+            "PCR index {} out of range 0-23",
+            other
+        ))),
     }
 }
 
@@ -542,14 +649,12 @@ fn rsa_public_to_spki(modulus: &[u8], exponent: u32) -> Vec<u8> {
 
 fn ak_template() -> Result<tss_esapi::structures::Public, TssError> {
     use tss_esapi::attributes::ObjectAttributes;
-    use tss_esapi::interface_types::algorithm::{HashingAlgorithm, SymmetricMode};
-    use tss_esapi::interface_types::ecc::EccCurve;
-    use tss_esapi::interface_types::key_bits::AesKeyBits;
+    use tss_esapi::interface_types::algorithm::HashingAlgorithm; // dropped SymmetricMode
+    use tss_esapi::interface_types::ecc::EccCurve; // dropped AesKeyBits import
     use tss_esapi::structures::{
         EccScheme, HashScheme, KeyDerivationFunctionScheme, Public, PublicEccParameters,
         SymmetricDefinitionObject,
     };
-
     let attrs = ObjectAttributes::builder()
         .with_fixed_tpm(true)
         .with_fixed_parent(true)
@@ -559,16 +664,12 @@ fn ak_template() -> Result<tss_esapi::structures::Public, TssError> {
         .with_sign_encrypt(true)
         .build()
         .map_err(|e| TssError::InvalidAk(format!("AK attrs: {}", e)))?;
-
     Ok(Public::Ecc {
         object_attributes: attrs,
         name_hashing_algorithm: HashingAlgorithm::Sha256,
         auth_policy: Default::default(),
         parameters: PublicEccParameters::new(
-            SymmetricDefinitionObject::Aes {
-                key_bits: AesKeyBits::Aes128,
-                mode: SymmetricMode::Cfb,
-            },
+            SymmetricDefinitionObject::Null,
             EccScheme::EcDsa(HashScheme::new(HashingAlgorithm::Sha256)),
             EccCurve::NistP256,
             KeyDerivationFunctionScheme::Null,
@@ -608,5 +709,49 @@ fn marshal_signature(sig: &tss_esapi::structures::Signature) -> Result<Vec<u8>, 
         }
         Signature::RsaSsa(rsa) => Ok(rsa.signature().value().to_vec()),
         _ => Err(TssError::Esapi("unsupported quote signature scheme".into())),
+    }
+}
+
+#[cfg(test)]
+mod compute_ak_name_tests {
+    use super::*;
+
+    /// Minimal marshaled TPMT_PUBLIC: type(2) || nameAlg(2) || trailing bytes.
+    fn tpmt_public_with_name_alg(name_alg: u16) -> Vec<u8> {
+        let mut b = Vec::new();
+        b.extend_from_slice(&0x0023u16.to_be_bytes()); // type = ECC
+        b.extend_from_slice(&name_alg.to_be_bytes());
+        b.extend_from_slice(&[0u8; 32]); // hashed as part of the Name
+        b
+    }
+
+    #[test]
+    fn sha256_name_alg_is_accepted() {
+        assert!(compute_ak_name(&tpmt_public_with_name_alg(0x000B)).is_ok());
+    }
+
+    #[test]
+    fn sha384_name_alg_is_accepted() {
+        assert!(compute_ak_name(&tpmt_public_with_name_alg(0x000C)).is_ok());
+    }
+
+    #[test]
+    fn sha512_name_alg_is_accepted() {
+        assert!(compute_ak_name(&tpmt_public_with_name_alg(0x000D)).is_ok());
+    }
+
+    #[test]
+    fn sha1_name_alg_is_rejected() {
+        assert!(compute_ak_name(&tpmt_public_with_name_alg(0x0004)).is_err());
+    }
+
+    #[test]
+    fn unknown_name_alg_is_rejected() {
+        assert!(compute_ak_name(&tpmt_public_with_name_alg(0xFFFF)).is_err());
+    }
+
+    #[test]
+    fn too_short_buffer_is_rejected() {
+        assert!(compute_ak_name(&[0x00, 0x23]).is_err());
     }
 }
