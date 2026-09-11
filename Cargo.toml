@@ -1,6 +1,6 @@
 [package]
 name = "fleetos-core"
-version = "0.1.5-rc-7"
+version = "0.1.5-rc-8"
 edition = "2024"
 license = "Apache-2.0"
 authors = ["Philip Aster and the FleetOS Contributors"]
@@ -10,7 +10,7 @@ description = "Core primitives, identity, and protocol definitions for FleetOS"
 default = ["minimal"]
 
 # Base primitives required by almost everyone
-minimal = ["dep:prost", "dep:tonic", "dep:tonic-prost", "dep:bytes", "dep:rand", "dep:chacha20poly1305", "dep:rustls", "dep:tracing", "dep:zeroize", "dep:x25519-dalek"]
+minimal = ["dep:prost", "dep:tonic", "dep:tonic-prost", "dep:bytes", "dep:rand", "dep:chacha20poly1305", "dep:rustls", "dep:tracing", "dep:zeroize", "dep:x25519-dalek", "dep:serde_json"]
 
 # Attestation backends (all imply `minimal` so they have SpiffeId/Hash/Proto)
 tpm = ["minimal", "dep:tss-esapi", "dep:sha2", "dep:spki"]
@@ -56,6 +56,7 @@ rcgen = { version = "0.14.9", optional = true }
 rsa = { version = "0.9.10", optional = true, default-features = false, features = ["sha2"] }
 rustls = { version = "0.23.43", optional = true }
 serde = { version = "1.0.229", default-features = false, features = ["derive"] }
+serde_json = { version = "1.0.151", optional = true }
 sha2 = { version = "0.11.0", optional = true }
 signature = { version = "3.0.0", optional = true }
 spki = { version = "0.8.0", optional = true }

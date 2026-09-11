@@ -40,22 +40,22 @@ message PodSpec {
   ResourceRequirements resources = 3;
   RestartPolicy restart_policy = 4;
   TerminationSpec termination = 5;
-  repeated VolumeMount volumes = 6;
+  // CR-17: renamed from `volumes` (field 6 — wire-compatible, number unchanged).
+  // Mount points; each references a Volume source below by name.
+  repeated VolumeMount volume_mounts = 6;
   repeated EnvVar env = 7;
   map<string, string> labels = 8;
   ProbeSet probes = 9;
-
   // Set exclusively by the scheduler during expansion.
-  // Callers submitting a WorkloadSpec cannot set these.
   optional uint32 ordinal = 10;
   optional string pod_id = 11;
-
-  // Required for standalone execution. Context from WorkloadSpec
-  // is injected here by the scheduler during expansion.
+  // Trusted fields — scheduler-assigned, caller values overwritten.
   string tenant_id = 12;
-  string workload_id = 13; // Used as the <name> in the SpiffeId URI
-  string role = 14;        // Used for the WorkloadRole X.509 extension
-  string image = 15;       // The OCI image to pull
+  string workload_id = 13;
+  string role = 14;
+  string image = 15;
+  // CR-17 (CR-CORE-2): volume sources, referenced by volume_mounts[].name.
+  repeated Volume volumes = 16;
 }
 
 message ContainerPort {
@@ -83,6 +83,39 @@ message VolumeMount {
   string name = 1;
   string mount_path = 2;
   bool read_only = 3;
+}
+
+// ================= CR-17 (CR-CORE-2): volume sources =================
+// A VolumeMount references a Volume by name. Persistent { volume_id, size_gb }
+// is DEFERRED — add it additively later with a fresh oneof field number.
+message Volume {
+  string name = 1; // referenced by VolumeMount.name
+  oneof source {
+    EmptyDir empty_dir = 2;
+    HostPath host_path = 3;
+  }
+}
+
+message EmptyDir {
+  optional uint64 size_limit_bytes = 1;
+}
+
+// SECURITY: HostPath is a zero-trust security surface. Default-DENY until an
+// explicit SAG/admin policy + security review enables it. Enforcement lives in
+// control/agent, not here (this comment is the schema-level annotation).
+message HostPath {
+  string path = 1;
+  HostPathType type = 2;
+}
+
+// Conservative subset for a zero-trust overlay; extend additively if needed.
+// UNSPECIFIED=0 is deliberate fail-closed: an unset type must not silently
+// mean a real type.
+enum HostPathType {
+  HOST_PATH_TYPE_UNSPECIFIED = 0;
+  DIRECTORY_OR_CREATE = 1;
+  DIRECTORY = 2;
+  FILE = 3;
 }
 
 message EnvVar {

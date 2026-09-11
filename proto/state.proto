@@ -1,6 +1,8 @@
 syntax = "proto3";
 package fleetos;
 
+import "workload.proto"; // CR-17/CR-CORE-1: embed full PodSpec in WorkloadAssignment
+
 // Pushes Service Authorization Graph (SAG) updates to nodes.
 service PolicyService {
   rpc WatchSag(WatchRequest) returns (stream SagUpdate);
@@ -70,6 +72,11 @@ message WorkloadAssignment {
   string runtime = 2;
   string image = 3;
   string role = 4;
+  // CR-17 (CR-CORE-1): the full expanded PodSpec. Fields 1–4 remain for wire
+  // compatibility but are subsumed here — the agent reads pod_id/ordinal/
+  // resources/volumes/probes from pod_spec. Populated by control's CR-CTRL-4
+  // expansion, which MUST be deterministic and reproducible on every replica.
+  PodSpec pod_spec = 5;
 }
 
 message RouteUpdate {
@@ -122,6 +129,10 @@ message WorkloadStatusReport {
   bool ready = 4;         // readiness probe passing
   bool live = 5;          // liveness probe passing
   uint64 observed_at_unix = 6;
+  // CR-17 (CR-CORE-3): K8s-parity status fields.
+  uint32 restart_count = 7;  // container restart count
+  bool started = 8;          // startup probe completed
+  bool policy_enforced = 9;  // eBPF policy live for this pod (Ruling D gate)
 }
 
 message StatusAck {

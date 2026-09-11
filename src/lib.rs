@@ -36,6 +36,8 @@ pub mod attestation;
 #[cfg(feature = "minimal")]
 pub mod crypto;
 #[cfg(feature = "minimal")]
+pub mod naming;
+#[cfg(feature = "minimal")]
 pub mod nonce;
 #[cfg(feature = "minimal")]
 pub mod proto;
@@ -71,6 +73,9 @@ pub use policy::ServiceAuthorizationGraph;
 
 #[cfg(feature = "minimal")]
 pub use nonce::Nonce;
+
+#[cfg(feature = "minimal")]
+pub use naming::dummy_ip_hostname;
 
 #[cfg(all(feature = "minimal", feature = "software-quote-verify"))]
 pub use attestation::quote::verify_pcr_binding;

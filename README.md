@@ -46,6 +46,7 @@ profile is untouched by backend code.
 | `version` | `MonotonicVersion` |
 | `mesh` | `MeshAddress`, `RouteHint` |
 | `proto` | Tonic-generated gRPC types + identity header framing |
+| `naming` | `dummy_ip_hostname` — canonical service-name → dummy-IP FQDN convention (CR-17) |
 
 ## Feature Flags
 

@@ -34,6 +34,7 @@ pub enum TpmEndpoint {
 use std::str::FromStr;
 use tss_esapi::interface_types::resource_handles::Hierarchy;
 use tss_esapi::structures::{Digest, Name};
+use zeroize::Zeroizing;
 
 /// Build the TCTI configuration string from a `TpmEndpoint`.
 fn build_tcti_name_conf(endpoint: &TpmEndpoint) -> Result<tss_esapi::TctiNameConf, TssError> {
@@ -710,6 +711,275 @@ fn marshal_signature(sig: &tss_esapi::structures::Signature) -> Result<Vec<u8>, 
         Signature::RsaSsa(rsa) => Ok(rsa.signature().value().to_vec()),
         _ => Err(TssError::Esapi("unsupported quote signature scheme".into())),
     }
+}
+
+// ================= CR-17 / CR-CORE-5: PCR-bound TPM2_Seal / TPM2_Unseal =================
+//
+// Seals a secret (e.g. the agent's X25519 sealing private key) under the Owner
+// hierarchy, bound to a caller-supplied PCR selection. The blob is persistable
+// (Serialize/Deserialize) so the agent can store it in fjall and unseal across
+// restarts. The PCR selection is a REQUIRED parameter — core provides the
+// primitive, the caller decides which PCRs to bind (no magic default).
+
+/// A persistable PCR-sealed blob. Carries everything needed to unseal on the
+/// same TPM: the TPM2B_PRIVATE (encrypted to the SRK, which is bound to this
+/// TPM's primary seed), the marshaled TPMT_PUBLIC (which embeds the PCR policy
+/// digest), and the PCR indices (needed to reconstruct the policy at unseal).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct SealedBlob {
+    /// TPM2B_PRIVATE of the sealed keyedhash object.
+    pub private: Vec<u8>,
+    /// Marshaled TPMT_PUBLIC of the sealed keyedhash object.
+    pub public: Vec<u8>,
+    /// PCR indices the blob is bound to.
+    pub pcr_indices: Vec<u8>,
+}
+
+/// SRK (storage root key) template under the Owner hierarchy: RSA-2048
+/// restricted-decrypt storage key, userWithAuth, no policy.
+fn srk_template() -> Result<tss_esapi::structures::Public, TssError> {
+    use tss_esapi::attributes::ObjectAttributes;
+    use tss_esapi::interface_types::algorithm::{HashingAlgorithm, SymmetricMode};
+    use tss_esapi::interface_types::key_bits::{AesKeyBits, RsaKeyBits};
+    use tss_esapi::structures::{
+        Public, PublicKeyRsa, PublicRsaParameters, RsaExponent, RsaScheme,
+        SymmetricDefinitionObject,
+    };
+    let attrs = ObjectAttributes::builder()
+        .with_fixed_tpm(true)
+        .with_fixed_parent(true)
+        .with_sensitive_data_origin(true)
+        .with_user_with_auth(true)
+        .with_restricted(true)
+        .with_decrypt(true)
+        .build()
+        .map_err(|e| TssError::Esapi(format!("SRK attrs: {}", e)))?;
+    Ok(Public::Rsa {
+        object_attributes: attrs,
+        name_hashing_algorithm: HashingAlgorithm::Sha256,
+        auth_policy: Default::default(),
+        parameters: PublicRsaParameters::new(
+            SymmetricDefinitionObject::Aes {
+                key_bits: AesKeyBits::Aes128,
+                mode: SymmetricMode::Cfb,
+            },
+            RsaScheme::Null,
+            RsaKeyBits::Rsa2048,
+            RsaExponent::try_from(0u32)
+                .map_err(|e| TssError::Esapi(format!("SRK exponent: {}", e)))?,
+        ),
+        unique: PublicKeyRsa::try_from(vec![0u8; 256])
+            .map_err(|e| TssError::Esapi(format!("SRK unique: {}", e)))?,
+    })
+}
+
+/// Create (or re-derive) the SRK primary under the Owner hierarchy.
+/// Deterministic for a given primary seed, so seal and unseal agree.
+fn create_srk(context: &mut tss_esapi::Context) -> Result<tss_esapi::handles::KeyHandle, TssError> {
+    use tss_esapi::interface_types::resource_handles::Hierarchy;
+    let template = srk_template()?;
+    let result = context
+        .execute_with_nullauth_session(|ctx| {
+            ctx.create_primary(Hierarchy::Owner, template, None, None, None, None)
+        })
+        .map_err(|e| TssError::Esapi(format!("create SRK primary failed: {}", e)))?;
+    Ok(result.key_handle)
+}
+
+/// Compute the PCR policy digest via a trial policy session. Passing an empty
+/// digest to PolicyPCR makes the TPM hash the CURRENT values of the selected
+/// PCRs, which is what we want at seal time.
+fn compute_pcr_policy_digest(
+    context: &mut tss_esapi::Context,
+    pcr_selection: &tss_esapi::structures::PcrSelectionList,
+) -> Result<tss_esapi::structures::Digest, TssError> {
+    use tss_esapi::constants::SessionType;
+    use tss_esapi::interface_types::algorithm::{HashingAlgorithm, SymmetricMode};
+    use tss_esapi::interface_types::key_bits::AesKeyBits;
+    use tss_esapi::interface_types::session_handles::PolicySession;
+    use tss_esapi::structures::{Digest, SymmetricDefinition};
+
+    let trial = context
+        .start_auth_session(
+            None,
+            None,
+            None,
+            SessionType::Trial,
+            SymmetricDefinition::Aes {
+                key_bits: AesKeyBits::Aes128,
+                mode: SymmetricMode::Cfb,
+            },
+            HashingAlgorithm::Sha256,
+        )
+        .map_err(|e| TssError::Esapi(format!("start trial session: {}", e)))?
+        .ok_or_else(|| TssError::Esapi("failed to allocate trial session".into()))?;
+    let policy_session: PolicySession = trial
+        .try_into()
+        .map_err(|e: tss_esapi::Error| TssError::Esapi(format!("trial convert: {}", e)))?;
+
+    context
+        .policy_pcr(policy_session, Digest::default(), pcr_selection.clone())
+        .map_err(|e| TssError::Esapi(format!("policy_pcr: {}", e)))?;
+    let digest = context
+        .policy_get_digest(policy_session)
+        .map_err(|e| TssError::Esapi(format!("policy_get_digest: {}", e)))?;
+    let session_handle: tss_esapi::handles::SessionHandle = policy_session.into();
+    let _ = context.flush_context(session_handle.into());
+    Ok(digest)
+}
+
+/// Sealed-data keyedhash object template: data-only, policy-gated, no
+/// sign/decrypt/userWithAuth.
+fn sealed_object_template(
+    policy_digest: tss_esapi::structures::Digest,
+) -> Result<tss_esapi::structures::Public, TssError> {
+    use tss_esapi::attributes::ObjectAttributes;
+    use tss_esapi::interface_types::algorithm::HashingAlgorithm;
+    use tss_esapi::structures::{KeyedHashScheme, Public, PublicKeyedHashParameters};
+    let attrs = ObjectAttributes::builder()
+        .with_fixed_tpm(true)
+        .with_fixed_parent(true)
+        .with_admin_with_policy(true)
+        .build()
+        .map_err(|e| TssError::Esapi(format!("sealed object attrs: {}", e)))?;
+    Ok(Public::KeyedHash {
+        name_hashing_algorithm: HashingAlgorithm::Sha256,
+        object_attributes: attrs,
+        auth_policy: policy_digest,
+        parameters: PublicKeyedHashParameters::new(KeyedHashScheme::Null),
+        unique: Default::default(), // empty for externally-supplied data
+    })
+}
+
+/// TPM2_Seal: seal `plaintext` under the Owner hierarchy, bound to the given
+/// PCR indices. The blob can only be unsealed on this TPM while the selected
+/// PCRs hold their current values.
+pub fn seal_to_pcr(
+    endpoint: &TpmEndpoint,
+    plaintext: &[u8],
+    pcr_indices: &[u8],
+) -> Result<SealedBlob, TssError> {
+    use tss_esapi::interface_types::algorithm::HashingAlgorithm;
+    use tss_esapi::structures::{PcrSelectionListBuilder, PcrSlot};
+    use tss_esapi::traits::Marshall;
+
+    let mut context = create_context(endpoint)?;
+    let slots: Vec<PcrSlot> = pcr_indices
+        .iter()
+        .map(|&i| pcr_slot_from_index(i))
+        .collect::<Result<Vec<_>, _>>()?;
+    let selection = PcrSelectionListBuilder::new()
+        .with_selection(HashingAlgorithm::Sha256, &slots)
+        .build()
+        .map_err(|e| TssError::Esapi(format!("bad PCR selection: {}", e)))?;
+
+    let policy_digest = compute_pcr_policy_digest(&mut context, &selection)?;
+    let srk = create_srk(&mut context)?;
+    let template = sealed_object_template(policy_digest)?;
+
+    // 1. Convert plaintext bytes into the proper SensitiveData buffer wrapper.
+    let data = tss_esapi::structures::SensitiveData::try_from(plaintext.to_vec())
+        .map_err(|e| TssError::Esapi(format!("sensitive data error: {}", e)))?;
+
+    // 2. Execute Context::create, passing the sensitive data directly.
+    let created = context
+        .execute_with_nullauth_session(|ctx| {
+            ctx.create(
+                srk,        // Parent key handle
+                template,   // Public area template
+                None,       // auth_value: Option<Auth> (None if no password auth needed)
+                Some(data), // sensitive_data: Option<SensitiveData> (Our sealed plaintext goes here)
+                None,       // outside_info: Option<Data>
+                None,       // creation_pcrs: Option<PcrSelectionList>
+            )
+        })
+        .map_err(|e| TssError::Esapi(format!("TPM2_Create (seal) failed: {}", e)))?;
+
+    let private = created.out_private.value().to_vec();
+    let public = created
+        .out_public
+        .marshall()
+        .map_err(|e| TssError::Esapi(format!("marshal sealed public: {}", e)))?;
+
+    Ok(SealedBlob {
+        private,
+        public,
+        pcr_indices: pcr_indices.to_vec(),
+    })
+}
+
+/// TPM2_Unseal: recover the sealed data. Succeeds only if the selected PCRs
+/// still hold the values they had at seal time. Returns `Zeroizing` bytes
+/// (matches `crypto::unseal` hygiene).
+pub fn unseal(endpoint: &TpmEndpoint, sealed: &SealedBlob) -> Result<Zeroizing<Vec<u8>>, TssError> {
+    use tss_esapi::constants::SessionType;
+    use tss_esapi::interface_types::algorithm::{HashingAlgorithm, SymmetricMode};
+    use tss_esapi::interface_types::key_bits::AesKeyBits;
+    use tss_esapi::interface_types::session_handles::PolicySession;
+    use tss_esapi::structures::{
+        Digest, PcrSelectionListBuilder, PcrSlot, Private, Public, SymmetricDefinition,
+    };
+    use tss_esapi::traits::UnMarshall;
+
+    let mut context = create_context(endpoint)?;
+    let srk = create_srk(&mut context)?;
+
+    let private = Private::try_from(sealed.private.clone())
+        .map_err(|e| TssError::Esapi(format!("bad private blob: {}", e)))?;
+    let public = Public::unmarshall(&sealed.public)
+        .map_err(|e| TssError::Esapi(format!("bad public blob: {}", e)))?;
+    let obj = context
+        .execute_with_nullauth_session(|ctx| ctx.load(srk, private, public))
+        .map_err(|e| TssError::Esapi(format!("TPM2_Load failed: {}", e)))?;
+
+    // Reconstruct the PCR selection and satisfy the policy.
+    let slots: Vec<PcrSlot> = sealed
+        .pcr_indices
+        .iter()
+        .map(|&i| pcr_slot_from_index(i))
+        .collect::<Result<Vec<_>, _>>()?;
+    let selection = PcrSelectionListBuilder::new()
+        .with_selection(HashingAlgorithm::Sha256, &slots)
+        .build()
+        .map_err(|e| TssError::Esapi(format!("bad PCR selection: {}", e)))?;
+
+    let policy_auth = context
+        .start_auth_session(
+            None,
+            None,
+            None,
+            SessionType::Policy,
+            SymmetricDefinition::Aes {
+                key_bits: AesKeyBits::Aes128,
+                mode: SymmetricMode::Cfb,
+            },
+            HashingAlgorithm::Sha256,
+        )
+        .map_err(|e| TssError::Esapi(format!("start policy session: {}", e)))?
+        .ok_or_else(|| TssError::Esapi("failed to allocate policy session".into()))?;
+    let policy_session: PolicySession = policy_auth
+        .try_into()
+        .map_err(|e: tss_esapi::Error| TssError::Esapi(format!("policy convert: {}", e)))?;
+
+    context
+        .execute_with_nullauth_session(|ctx| {
+            ctx.policy_pcr(policy_session, Digest::default(), selection)
+        })
+        .map_err(|e| TssError::Esapi(format!("policy_pcr (unseal) failed: {}", e)))?;
+
+    // FIX: Session 1 (obj auth) must be the satisfied policy session.
+    // The sealed object was created with admin_with_policy=true and NO user_with_auth,
+    // so USER-role commands (Unseal) MUST be authorized via policy, not password.
+    context.set_sessions((Some(policy_auth), None, None));
+
+    let data = context
+        .unseal(obj.into())
+        .map_err(|e| TssError::Esapi(format!("TPM2_Unseal failed: {}", e)))?;
+
+    // Flush sessions (mirrors activate()'s hygiene note).
+    context.set_sessions((None, None, None));
+
+    Ok(Zeroizing::new(data.value().to_vec()))
 }
 
 #[cfg(test)]

@@ -38,6 +38,8 @@ pub mod identity {
 }
 
 pub mod secret {
+    // CR-17 (CR-CORE-4): agent-side client for FetchSecret.
+    pub use crate::proto::fleetos::secret_service_client::SecretServiceClient;
     pub use crate::proto::fleetos::secret_service_server::SecretService;
     pub use crate::proto::fleetos::{FetchSecretRequest, SealedSecret};
 }
@@ -74,6 +76,11 @@ pub mod state {
         WorkloadAssignment,
         WorkloadStatusReport,
     };
+
+    // CR-17 (CR-CORE-4): agent-side clients for the pull/watch services.
+    pub use crate::proto::fleetos::policy_service_client::PolicyServiceClient;
+    pub use crate::proto::fleetos::scheduler_service_client::SchedulerServiceClient;
+    pub use crate::proto::fleetos::watch_service_client::WatchServiceClient;
 }
 
 pub mod provisioning {
