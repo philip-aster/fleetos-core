@@ -1,0 +1,79 @@
+syntax = "proto3";
+package fleetos;
+
+// ================= CR-CORE-8: Interactive debugging =================
+// Spans both planes (node-authenticated agent leg + operator-authenticated
+// operator leg). Runtime-agnostic: carries pod_id + opaque bytes.
+//
+// Core-owned conventions:
+// - Channel bytes: 0=stdin, 1=stdout, 2=stderr (K8s streaming convention).
+// - session_id: control-minted, globally unique, unguessable (UUIDv4 or BLAKE3).
+//   Opaque to the agent.
+// - Grant action verbs: "exec", "logs", "port-forward". Used by control to
+//   validate operator JIT grants (OperatorGrantId).
+
+// Agent-facing reverse tunnel (DC listener, node SVID).
+service AgentDebugService {
+  // One long-lived bidi stream per agent. Control sends SessionStart/End/Data
+  // down; agent sends SessionAck/Data/SessionEnd up. Multiplexed by session_id.
+  rpc AgentConnect(stream DebugFrame) returns (stream DebugFrame);
+}
+
+// Operator-facing (Admin listener, operator SVID, via fleetctl-proxy).
+service OperatorDebugService {
+  // Operator opens a session; control bridges it onto the target agent's
+  // AgentConnect stream. Bytes relayed bidirectionally.
+  rpc OperatorSession(stream DebugFrame) returns (stream DebugFrame);
+}
+
+message DebugFrame {
+  string session_id = 1;
+  oneof payload {
+    SessionStart start = 2;
+    SessionAck   ack   = 3;
+    DataChunk    data  = 4;
+    SessionEnd   end   = 5;
+  }
+}
+
+message SessionStart {
+  string pod_id = 1;
+  oneof kind {
+    ExecRequest        exec         = 2;
+    LogsRequest        logs         = 3;
+    PortForwardRequest port_forward = 4;
+  }
+}
+
+message ExecRequest {
+  repeated string command = 1;
+  bool tty   = 2;
+  bool stdin = 3;
+}
+
+message LogsRequest {
+  string container = 1;
+  int64  tail_lines = 2;
+  bool   follow     = 3;
+  bool   timestamps = 4;
+}
+
+message PortForwardRequest {
+  uint32 target_port = 1;
+}
+
+message SessionAck {
+  bool   accepted = 1;
+  string reject_reason = 2;
+}
+
+message DataChunk {
+  // 0=stdin, 1=stdout, 2=stderr
+  uint32 channel = 1;
+  bytes  payload = 2;
+}
+
+message SessionEnd {
+  bool   error   = 1;
+  string message = 2;
+}

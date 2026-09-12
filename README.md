@@ -91,10 +91,11 @@ All gRPC types are generated via `tonic_prost_build` in `build.rs` — **not**
 |---|---|
 | `identity.proto` | `AttestationService` (insecure join-token + secure TPM credential-activation), `CaService` |
 | `admin.proto` | `AdminService` (tenants, workloads, SAG, secrets, nodes, EK registration, PCR policy, quotas, operator access, audit log, node pools) |
-| `state.proto` | `PolicyService`, `SchedulerService`, `RouterAssignmentService`, `WatchService`, `WorkloadStatusService`, `DelegationService` |
+| `state.proto` | `PolicyService`, `SchedulerService`, `RouterAssignmentService`, `WatchService`, `WorkloadStatusService`, `DelegationService`, `PodEventService` |
 | `secret.proto` | `SecretService` |
 | `provisioning.proto` | `ProvisioningService` |
 | `workload.proto` | Message types only (`WorkloadSpec`, `PodSpec`, `CronWorkload`, etc.) |
+| `debug.proto` | `AgentDebugService`, `OperatorDebugService` (Interactive debugging reverse-tunnel) |
 
 ## `no_std` and eBPF Support
 

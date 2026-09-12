@@ -182,3 +182,35 @@ message DelegatedKeyResponse {
   bytes key_material = 2;   // opaque; control's postcard shadow-struct format
   uint64 expires_at_unix = 3;
 }
+
+// ================= CR-CORE-8: Pod lifecycle events =================
+// Node->control telemetry. Never Raft-replicated (leader-local, TTL'd, capped).
+// Canonical event_type vocabulary: Pulled, Created, Started, ProbeFailed,
+// BackOff, OOMKilled, Evicting, GracePeriodExpired, FailedScheduling.
+message PodEvent {
+  string pod_id        = 1;
+  string node_id       = 2;
+  string event_type    = 3;
+  string reason        = 4;
+  string message       = 5;
+  uint64 timestamp_unix = 6;
+  uint32 count         = 7;
+}
+
+service PodEventService {
+  // Agent -> control (DC listener, node SVID). Batched.
+  rpc ReportPodEvents(ReportPodEventsRequest) returns (ReportPodEventsResponse);
+  // Operator/fleetctl -> control (Admin listener, operator SVID).
+  rpc WatchPodEvents(WatchPodEventsRequest) returns (stream PodEvent);
+}
+
+message ReportPodEventsRequest {
+  repeated PodEvent events = 1;
+}
+
+message ReportPodEventsResponse {}
+
+message WatchPodEventsRequest {
+  string pod_id = 1;
+  string tenant_id = 2;
+}

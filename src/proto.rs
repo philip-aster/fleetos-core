@@ -83,6 +83,13 @@ pub mod state {
     pub use crate::proto::fleetos::policy_service_client::PolicyServiceClient;
     pub use crate::proto::fleetos::scheduler_service_client::SchedulerServiceClient;
     pub use crate::proto::fleetos::watch_service_client::WatchServiceClient;
+
+    // CR-CORE-8: Pod lifecycle events
+    pub use crate::proto::fleetos::pod_event_service_client::PodEventServiceClient;
+    pub use crate::proto::fleetos::pod_event_service_server::PodEventService;
+    pub use crate::proto::fleetos::{
+        PodEvent, ReportPodEventsRequest, ReportPodEventsResponse, WatchPodEventsRequest,
+    };
 }
 
 pub mod provisioning {
@@ -100,6 +107,17 @@ pub mod workload {
         PodSpec, Probe, ProbeSet, ReplaceStrategy, ResourceRequirements, RestartPolicy,
         RollingReplaceStrategy, TcpSocketCheck, TerminationSpec, UpdateStrategy, VolumeMount,
         WorkloadSpec,
+    };
+}
+
+pub mod debug {
+    pub use crate::proto::fleetos::agent_debug_service_client::AgentDebugServiceClient;
+    pub use crate::proto::fleetos::agent_debug_service_server::AgentDebugService;
+    pub use crate::proto::fleetos::operator_debug_service_client::OperatorDebugServiceClient;
+    pub use crate::proto::fleetos::operator_debug_service_server::OperatorDebugService;
+    pub use crate::proto::fleetos::{
+        DataChunk, DebugFrame, ExecRequest, LogsRequest, PortForwardRequest, SessionAck,
+        SessionEnd, SessionStart,
     };
 }
 
