@@ -27,6 +27,7 @@ service WatchService {
 // controller has a death signal other than missing placements.
 service WorkloadStatusService {
   rpc ReportWorkloadStatus(WorkloadStatusReport) returns (StatusAck);
+  rpc ReportPodMetrics(PodMetrics) returns (MetricsAck); // CR-CORE-9
 }
 
 message WatchRequest {
@@ -77,6 +78,8 @@ message WorkloadAssignment {
   // resources/volumes/probes from pod_spec. Populated by control's CR-CTRL-4
   // expansion, which MUST be deterministic and reproducible on every replica.
   PodSpec pod_spec = 5;
+  // Directive A.1: Canonical FQDN for /etc/hosts injection
+  string hostname = 6;
 }
 
 message RouteUpdate {
@@ -133,6 +136,21 @@ message WorkloadStatusReport {
   uint32 restart_count = 7;  // container restart count
   bool started = 8;          // startup probe completed
   bool policy_enforced = 9;  // eBPF policy live for this pod (Ruling D gate)
+  bool router_connected = 10; // Directive A.1: Node-level routing health signal
+}
+
+// CR-CORE-9: Per-pod metrics for HPA
+message PodMetrics {
+  string pod_id = 1;
+  uint32 cpu_millicores = 2;
+  uint64 memory_bytes = 3;
+  uint64 net_tx_bytes = 4;
+  uint64 net_rx_bytes = 5;
+  uint64 window_unix = 6;
+}
+
+message MetricsAck {
+  bool accepted = 1;
 }
 
 message StatusAck {

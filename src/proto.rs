@@ -62,7 +62,9 @@ pub mod state {
         // CR-16: Re-exported from state.proto for node-facing services
         DelegatedKeyRequest,
         DelegatedKeyResponse,
+        MetricsAck,
         PeerSelector,
+        PodMetrics,
         RouteEntry,
         RouteUpdate,
         SagRule,

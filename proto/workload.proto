@@ -34,6 +34,24 @@ message RollingReplaceStrategy {
   uint32 max_unavailable = 2;
 }
 
+// CR-CORE-10: Init containers
+message InitContainer {
+  string name = 1;
+  string image = 2;
+  repeated string command = 3;
+  repeated EnvVar env = 4;
+  ResourceRequirements resources = 5;
+}
+
+// CR-CORE-10: Tolerations (Taints are owned by control's NodeRecord)
+message Toleration {
+  string key = 1;
+  string operator = 2; // "Exists" or "Equal"
+  string value = 3;
+  string effect = 4; // "NoSchedule", "PreferNoSchedule", "NoExecute"
+  int64 toleration_seconds = 5;
+}
+
 message PodSpec {
   string runtime = 1; // "containerd" or "cloud-hypervisor"
   repeated ContainerPort ports = 2;
@@ -56,6 +74,10 @@ message PodSpec {
   string image = 15;
   // CR-17 (CR-CORE-2): volume sources, referenced by volume_mounts[].name.
   repeated Volume volumes = 16;
+  // CR-CORE-10 Additions
+  repeated InitContainer init_containers = 17;
+  int32 priority = 18;
+  repeated Toleration tolerations = 19;
 }
 
 message ContainerPort {
