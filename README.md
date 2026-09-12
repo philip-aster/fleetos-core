@@ -38,7 +38,7 @@ profile is untouched by backend code.
 | `crypto` | X25519 + ChaCha20-Poly1305 secret sealing (`seal`/`unseal`), `generate_sealing_keypair` |
 | `attestation` | Attestation contracts: `PcrValue`, `PcrPolicy`, `EkFingerprint`, activation proof, `HardwareAttestor`/`QuoteVerifier` traits |
 | `attestation::quote` | `TpmQuote`, structural verification, software AK signature verification, PCR-digest binding (`software-quote-verify`) |
-| `attestation::tpm` | TPM 2.0 client I/O + server primitives: `TpmEndpoint`, `make_credential`, `AttestationSession` (`tpm`) |
+| `attestation::tpm` | TPM 2.0 client I/O + server primitives: `TpmEndpoint`, `make_credential`, `AttestationSession`, `seal_to_pcr / unseal` (`tpm`) |
 | `operator` | `OperatorGrantId` — canonical operator access grant identity |
 | `tenant` | `TenantId` with validation |
 | `nonce` | `Nonce` (32-byte, `rand`-backed) |
@@ -53,7 +53,7 @@ profile is untouched by backend code.
 | Feature | Description |
 |---|---|
 | `minimal` *(default)* | Base primitives: proto, crypto, identity, policy. Requires `std` + `alloc`. |
-| `tpm` | TPM 2.0 client I/O (`AttestationSession`) + server primitive (`make_credential`). Requires system TPM2 TSS libraries. |
+| `tpm` | TPM 2.0 client I/O (`AttestationSession`) + server primitive (`make_credential`, `seal_to_pcr`, `unseal`). Requires system TPM2 TSS libraries. |
 | `software-quote-verify` | Device-free AK signature verification (RSA PKCS#1v1.5 + ECDSA P-256) and PCR-digest binding. Pure Rust — no TPM hardware or system libraries required. |
 | `ca` | CSR construction (`build_csr`) + CA signing helpers via `rcgen`. |
 | `vsock-attest` | VSOCK attestation for MicroVM boundaries. **Declared, not yet implemented.** |
@@ -91,7 +91,7 @@ All gRPC types are generated via `tonic_prost_build` in `build.rs` — **not**
 |---|---|
 | `identity.proto` | `AttestationService` (insecure join-token + secure TPM credential-activation), `CaService` |
 | `admin.proto` | `AdminService` (tenants, workloads, SAG, secrets, nodes, EK registration, PCR policy, quotas, operator access, audit log, node pools) |
-| `state.proto` | `PolicyService`, `SchedulerService`, `RouterAssignmentService`, `WatchService`, `WorkloadStatusService` |
+| `state.proto` | `PolicyService`, `SchedulerService`, `RouterAssignmentService`, `WatchService`, `WorkloadStatusService`, `DelegationService` |
 | `secret.proto` | `SecretService` |
 | `provisioning.proto` | `ProvisioningService` |
 | `workload.proto` | Message types only (`WorkloadSpec`, `PodSpec`, `CronWorkload`, etc.) |
