@@ -60,6 +60,33 @@ service AdminService {
 
   // --- CR-9: replicated audit log ---
   rpc ListAuditLog(ListAuditLogRequest) returns (ListAuditLogResponse);
+
+  // --- CR-CTRL-9: Taint management ---
+  // Full-set replace per node.
+  rpc SetNodeTaints(SetNodeTaintsRequest) returns (NodeAck);
+  // Remove a specific taint by key + effect.
+  rpc RemoveNodeTaint(RemoveNodeTaintRequest) returns (NodeAck);
+}
+
+// ================= CR-CTRL-9: Taint management =================
+// Taints are applied to nodes (stored in control's NodeRecord).
+// Effects must match the Toleration.effect vocabulary in workload.proto.
+message Taint {
+  string key = 1;
+  string value = 2;
+  string effect = 3; // "NoSchedule" | "PreferNoSchedule" | "NoExecute"
+  int64 time_added_unix = 4;
+}
+
+message SetNodeTaintsRequest {
+  string node_id = 1;
+  repeated Taint taints = 2;
+}
+
+message RemoveNodeTaintRequest {
+  string node_id = 1;
+  string key = 2;
+  string effect = 3; // Required to uniquely identify the taint
 }
 
 message CreateTenantRequest {

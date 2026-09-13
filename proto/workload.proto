@@ -9,8 +9,20 @@ message WorkloadSpec {
   // The scheduler expands this into individual PodSpecs.
   map<string, uint32> replicas = 4;
   PodSpec pod_spec = 5;
-  PlacementMode placement = 6;       // NEW
-  UpdateStrategy update_strategy = 7; // NEW
+  PlacementMode placement = 6;
+  UpdateStrategy update_strategy = 7;
+  AutoscalingPolicy autoscaling = 8;
+}
+
+// ================= CR-CTRL-8 / CR-CORE-9: Autoscaling Policy =================
+// Declarative HPA policy. Absent policy = autoscaling disabled (fail-closed).
+// Consumed read-only by control's HPA controller, which proposes ScaleWorkload.
+message AutoscalingPolicy {
+  bool enabled = 1;
+  uint32 target_cpu_millicores = 2;  // per-pod target utilization
+  uint32 min_replicas = 3;
+  uint32 max_replicas = 4;
+  uint32 stabilization_window_seconds = 5; // scale-down anti-thrash
 }
 
 enum PlacementMode {

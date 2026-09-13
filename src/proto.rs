@@ -18,10 +18,10 @@ pub mod admin {
         ListOperatorAccessRequest, ListOperatorAccessResponse, NodeAck, NodeId, NodePoolAck,
         NodePoolCreateRequest, NodePoolDeleteRequest, NodePoolInfo, OperatorAccessAck,
         OperatorAccessGrant, OperatorScope, PcrPolicyAck, PcrValueProto, QuotaAck, QuotaRequest,
-        QuotaResponse, RegisterNodeEkRequest, RegisterNodeEkResponse, RevokeNodeEkRequest,
-        RevokeOperatorAccessRequest, SagRuleAck, ScaleWorkloadRequest, SecretAck, SecretAclChange,
-        SetPcrPolicyRequest, StoreSecretRequest, TenantQuota, UpsertSagRuleRequest,
-        WorkloadSpecAck,
+        QuotaResponse, RegisterNodeEkRequest, RegisterNodeEkResponse, RemoveNodeTaintRequest,
+        RevokeNodeEkRequest, RevokeOperatorAccessRequest, SagRuleAck, ScaleWorkloadRequest,
+        SecretAck, SecretAclChange, SetNodeTaintsRequest, SetPcrPolicyRequest, StoreSecretRequest,
+        Taint, TenantQuota, UpsertSagRuleRequest, WorkloadSpecAck,
     };
 }
 
