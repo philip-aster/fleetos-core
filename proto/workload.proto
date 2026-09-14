@@ -12,6 +12,23 @@ message WorkloadSpec {
   PlacementMode placement = 6;
   UpdateStrategy update_strategy = 7;
   AutoscalingPolicy autoscaling = 8;
+  map<string, DisruptionBudget> budgets = 9;
+}
+
+// Additive: Disruption Budget Value (CR-CTRL-6)
+message DisruptionBudgetValue {
+  oneof value {
+    uint32 count = 1;
+    uint32 percent = 2; // 0-100
+  }
+}
+
+// Additive: Disruption Budget (CR-CTRL-6)
+message DisruptionBudget {
+  oneof policy {
+    DisruptionBudgetValue min_available = 1;
+    DisruptionBudgetValue max_unavailable = 2;
+  }
 }
 
 // ================= CR-CTRL-8 / CR-CORE-9: Autoscaling Policy =================

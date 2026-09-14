@@ -32,7 +32,7 @@ service AdminService {
 
   // --- CR-2: node administration ---
   rpc CordonNode(NodeId) returns (NodeAck);
-  rpc EvictNode(NodeId) returns (NodeAck); // admin-initiated; distinct from lease eviction
+  rpc EvictNode(EvictNodeRequest) returns (NodeAck);
 
   // --- CR-12: node pool management (V-3 remediation — Raft entry point) ---
   rpc CreateNodePool(NodePoolCreateRequest) returns (NodePoolAck);
@@ -66,6 +66,25 @@ service AdminService {
   rpc SetNodeTaints(SetNodeTaintsRequest) returns (NodeAck);
   // Remove a specific taint by key + effect.
   rpc RemoveNodeTaint(RemoveNodeTaintRequest) returns (NodeAck);
+}
+
+// Additive: Force flags for disruptive mutations (CR-CTRL-6)
+message ScaleWorkloadRequest {
+  string tenant_id = 1;
+  string workload_id = 2;
+  map<string, uint32> replicas = 3;
+  bool force = 4; // Bypasses DisruptionBudget checks
+}
+
+message DeleteWorkloadRequest {
+  string tenant_id = 1;
+  string workload_id = 2;
+  bool force = 3; // Bypasses DisruptionBudget checks
+}
+
+message EvictNodeRequest {
+  string node_svid = 1;
+  bool force = 2; // Bypasses DisruptionBudget checks for pods on this node
 }
 
 // ================= CR-CTRL-9: Taint management =================
@@ -161,21 +180,6 @@ message SecretAclChange {
   string tenant_id = 1;
   string key = 2;
   string spiffe_id = 3;
-}
-
-// CR-16: RequestDelegatedKey resolves via import "state.proto" (node-callable path), but remains here for operator override.
-
-// ================= CR-2: workload lifecycle =================
-
-message DeleteWorkloadRequest {
-  string tenant_id = 1;
-  string workload_id = 2;
-}
-
-message ScaleWorkloadRequest {
-  string tenant_id = 1;
-  string workload_id = 2;
-  map<string, uint32> replicas = 3; // per-role desired counts; same shape as WorkloadSpec.replicas
 }
 
 // ================= CR-2: node administration =================

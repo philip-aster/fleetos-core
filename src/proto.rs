@@ -12,11 +12,11 @@ pub mod admin {
     pub use crate::proto::fleetos::{
         AuditEntry, ClusterStatus, CreateTenantRequest, CreateTenantResponse, CronWorkloadAck,
         DelegatedKeyRequest, DelegatedKeyResponse, DeleteSagRuleRequest, DeleteWorkloadRequest,
-        GenerateJoinTokenRequest, GenerateJoinTokenResponse, GetClusterStatusRequest,
-        GrantOperatorAccessRequest, ListAuditLogRequest, ListAuditLogResponse,
-        ListNodePoolsRequest, ListNodePoolsResponse, ListNodesRequest, ListNodesResponse,
-        ListOperatorAccessRequest, ListOperatorAccessResponse, NodeAck, NodeId, NodePoolAck,
-        NodePoolCreateRequest, NodePoolDeleteRequest, NodePoolInfo, OperatorAccessAck,
+        EvictNodeRequest, GenerateJoinTokenRequest, GenerateJoinTokenResponse,
+        GetClusterStatusRequest, GrantOperatorAccessRequest, ListAuditLogRequest,
+        ListAuditLogResponse, ListNodePoolsRequest, ListNodePoolsResponse, ListNodesRequest,
+        ListNodesResponse, ListOperatorAccessRequest, ListOperatorAccessResponse, NodeAck, NodeId,
+        NodePoolAck, NodePoolCreateRequest, NodePoolDeleteRequest, NodePoolInfo, OperatorAccessAck,
         OperatorAccessGrant, OperatorScope, PcrPolicyAck, PcrValueProto, QuotaAck, QuotaRequest,
         QuotaResponse, RegisterNodeEkRequest, RegisterNodeEkResponse, RemoveNodeTaintRequest,
         RevokeNodeEkRequest, RevokeOperatorAccessRequest, SagRuleAck, ScaleWorkloadRequest,
@@ -103,10 +103,10 @@ pub mod provisioning {
 
 pub mod workload {
     pub use crate::proto::fleetos::{
-        ContainerPort, CronSchedule, CronWorkload, EnvVar, ExecCheck, HttpGetCheck, PlacementMode,
-        PodSpec, Probe, ProbeSet, ReplaceStrategy, ResourceRequirements, RestartPolicy,
-        RollingReplaceStrategy, TcpSocketCheck, TerminationSpec, UpdateStrategy, VolumeMount,
-        WorkloadSpec,
+        ContainerPort, CronSchedule, CronWorkload, DisruptionBudget, DisruptionBudgetValue, EnvVar,
+        ExecCheck, HttpGetCheck, PlacementMode, PodSpec, Probe, ProbeSet, ReplaceStrategy,
+        ResourceRequirements, RestartPolicy, RollingReplaceStrategy, TcpSocketCheck,
+        TerminationSpec, UpdateStrategy, VolumeMount, WorkloadSpec,
     };
 }
 
