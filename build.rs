@@ -13,6 +13,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         proto_dir.join("admin.proto"),
         proto_dir.join("workload.proto"),
         proto_dir.join("debug.proto"),
+        proto_dir.join("apply.proto"),
     ];
 
     // Tell Cargo to rerun this build script if any proto file changes

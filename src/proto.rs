@@ -121,6 +121,14 @@ pub mod debug {
     };
 }
 
+pub mod apply {
+    pub use crate::proto::fleetos::{
+        ApplyRequest, ApplyResponse, ApplyResult, ApplyStatus, FieldConflict, Manifest,
+        ManifestList, ManifestNodePoolSpec, ManifestSagRuleSpec, ManifestSecretSpec,
+        ManifestTenantSpec, ManifestWorkloadSpec,
+    };
+}
+
 /// Out-of-band identity header prefixing gRPC frames.
 /// 4-byte length + identity header + gRPC frame.
 pub mod identity_header {

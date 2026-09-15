@@ -1,0 +1,99 @@
+syntax = "proto3";
+package fleetos;
+
+import "workload.proto";
+import "state.proto";
+import "provisioning.proto";
+
+// ================= CR-CTRL-10: Declarative Apply API =================
+
+message Manifest {
+  string api_version = 1;  // e.g., "fleetos.dev/v1alpha1"
+  string kind = 2;         // "Workload", "Tenant", "SagRule", "Secret", "NodePool"
+  string name = 3;         // object identifier (workload_id, tenant_id, etc.)
+  string tenant_id = 4;    // for tenant-scoped objects; empty for cluster-scoped
+
+  oneof spec {
+    ManifestWorkloadSpec workload = 10;
+    ManifestTenantSpec tenant = 11;
+    ManifestSagRuleSpec sag_rule = 12;
+    ManifestSecretSpec secret = 13;
+    ManifestNodePoolSpec node_pool = 14;
+  }
+}
+
+message ManifestList {
+  repeated Manifest manifests = 1;
+}
+
+message ApplyRequest {
+  ManifestList manifest_list = 1;
+  bool dry_run = 2;  // v1: compute merge, report conflicts, don't commit
+}
+
+message ApplyResponse {
+  bool applied = 1;
+  uint64 version = 2;  // MonotonicVersion after apply (0 if dry_run or no-op)
+  repeated ApplyResult results = 3;
+}
+
+message ApplyResult {
+  string kind = 1;
+  string name = 2;
+  string tenant_id = 3;
+  ApplyStatus status = 4;
+  repeated FieldConflict conflicts = 5;  // populated when status = CONFLICT
+}
+
+enum ApplyStatus {
+  APPLIED = 0;
+  UNCHANGED = 1;   // idempotent no-op
+  CONFLICT = 2;    // three-way merge conflict
+  CREATED = 3;     // new object
+  INVALID = 4;     // validation error
+}
+
+message FieldConflict {
+  string field_path = 1;       // e.g. "replicas.primary"
+  string live_value = 2;
+  string manifest_value = 3;
+  string last_applied_value = 4;
+}
+
+// --- Manifest-Specific Specs (Presence-Tracking) ---
+// These mirror the runtime specs but use `optional` to distinguish
+// "user explicitly set this" from "user omitted this" for three-way merge.
+
+message ManifestWorkloadSpec {
+  optional string image = 1;
+  map<string, uint32> replicas = 2;  // map fields have presence in proto3
+  optional PodSpec pod_spec = 3;
+  optional PlacementMode placement = 4;
+  optional UpdateStrategy update_strategy = 5;
+  optional AutoscalingPolicy autoscaling = 6;
+}
+
+message ManifestTenantSpec {
+  // Tenant creation currently only requires tenant_id (in Manifest.name).
+  // Reserved for future tenant-level config (e.g., quotas).
+}
+
+message ManifestSagRuleSpec {
+  optional PeerSelector from = 1;
+  optional PeerSelector to = 2;
+  optional SagRule.Action action = 3;
+}
+
+message ManifestSecretSpec {
+  optional bytes value = 1;
+  repeated string authorized_spiffe_ids = 2;
+}
+
+message ManifestNodePoolSpec {
+  optional NodeKind node_kind = 1;
+  optional uint32 desired_count = 2;
+  optional uint32 vcpus = 3;
+  optional uint32 memory_mb = 4;
+  optional uint32 disk_gb = 5;
+  optional string region_hint = 6;
+}
