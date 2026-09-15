@@ -4,6 +4,7 @@ package fleetos;
 import "workload.proto";
 import "state.proto"; // CR-2: reuse SagRule/PeerSelector — never redefine.
 import "provisioning.proto"; // CR-12: reuse NodeKind — never redefine.
+import "apply.proto"; // CR-CTRL-10: ApplyRequest/ApplyResponse for server-side apply.
 
 service AdminService {
   // --- Existing surface (unchanged) ---
@@ -66,6 +67,13 @@ service AdminService {
   rpc SetNodeTaints(SetNodeTaintsRequest) returns (NodeAck);
   // Remove a specific taint by key + effect.
   rpc RemoveNodeTaint(RemoveNodeTaintRequest) returns (NodeAck);
+
+  // --- CR-CTRL-10: declarative server-side apply ---
+  // Applies a ManifestList through the three-way merge engine. dry_run
+  // computes merge and reports conflicts without committing. Gating
+  // (ctrl/operator SVIDs) and fail-closed api_version/kind validation
+  // are application-side responsibilities of the implementation.
+   rpc Apply(ApplyRequest) returns (ApplyResponse);
 }
 
 // Additive: Force flags for disruptive mutations (CR-CTRL-6)
