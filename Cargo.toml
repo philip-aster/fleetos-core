@@ -1,6 +1,6 @@
 [package]
 name = "fleetos-core"
-version = "0.1.8-rc-1"
+version = "0.2.0-rc-1"
 edition = "2024"
 license = "Apache-2.0"
 authors = ["Philip Aster and the FleetOS Contributors"]
@@ -21,7 +21,7 @@ vsock-attest = ["minimal", "dep:vsock", "dep:sha2"]
 software-quote-verify = ["minimal", "dep:rsa", "dep:ecdsa", "dep:p256", "dep:signature", "dep:sha2"]
 
 # CA signing helpers (fleetos-control only)
-ca = ["minimal", "dep:rcgen", "x509-cert", "der"]
+ca = ["minimal", "dep:rcgen", "dep:x509-parser", "dep:base64", "dep:time", "rustls/ring", "rcgen/pem", "rcgen/x509-parser", "x509-cert", "der"]
 dev = ["minimal"]
 full = ["tpm", "vsock-attest", "ca", "software-quote-verify", "dev"]
 
@@ -43,6 +43,7 @@ spki = ["dep:spki"]
 
 [dependencies]
 async-trait = "0.1.92"
+base64 = { version = "0.23.1", optional = true }
 blake3 = { version = "1.8.6", default-features = false }
 bytemuck = { version = "1.25.2", default-features = false, features = ["derive"] }
 bytes = { version = "1.12.1", optional = true }
@@ -61,6 +62,7 @@ sha2 = { version = "0.11.0", optional = true }
 signature = { version = "3.0.0", optional = true }
 spki = { version = "0.8.0", optional = true }
 thiserror = { version = "2.0.20", default-features = false }
+time = { version = "0.3.55", optional = true }
 tonic = { version = "0.14.6", optional = true }
 tonic-prost = { version = "0.14.6", optional = true }
 tracing = { version = "0.1.44", optional = true }
@@ -68,6 +70,7 @@ tss-esapi = { version = "7.7.0", optional = true }
 vsock = { version = "0.5.4", optional = true }
 x25519-dalek = { version = "3.0.0", default-features = false, features = ["getrandom", "static_secrets"], optional = true }
 x509-cert = { version = "0.3.0", default-features = false, features = ["builder"], optional = true }
+x509-parser = { version = "0.18.1", optional = true }
 zeroize = { version = "1.9.0", default-features = false, features = ["zeroize_derive"], optional = true }
 
 [build-dependencies]

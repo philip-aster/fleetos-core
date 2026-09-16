@@ -53,7 +53,7 @@ traits, types, and conventions; downstream binaries own the I/O.
 | `minimal` (default)|Base primitives: proto, crypto, identity, policy. Requires `std` + `alloc`.|
 | `tpm`|TPM 2.0 client I/O (`AttestationSession`) + server primitive (`make_credential`, `seal_to_pcr`, `unseal`). Requires system TPM2 TSS libraries.|
 | `software-quote-verify`|Device-free AK signature verification (RSA PKCS#1v1.5 + ECDSA P-256) and PCR-digest binding. Pure Rust — no TPM hardware or system libraries required.|
-| `ca`|CSR construction (`build_csr`) + CA signing helpers via `rcgen`.|
+| `ca`|CSR construction ( `build_csr` ), SPIFFE SAN extraction/validation, OID extension builders, and delegated (degraded-mode) renewal signing via  `rcgen`  +  `rustls`.|
 | `vsock-attest`|VSOCK attestation for MicroVM boundaries. Declared, not yet implemented.|
 | `dev`|Mock attestation for integration tests. `compile_error!`-gated behind `RUSTFLAGS='--cfg fleetos_dev'`. Never shippable.|
 | `production`|`tpm` + `vsock-attest` + `ca` + `software-quote-verify`. Everything except `dev`.|
