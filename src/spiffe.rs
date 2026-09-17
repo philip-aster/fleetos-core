@@ -648,13 +648,13 @@ pub struct DelegatedSigningKey {
     pub node_id: SpiffeId,           // The node this key was issued to
     pub target_svid_id: SpiffeId,    // The workload SVID this key is allowed to renew
     pub target_ordinal: Option<u32>, // The exact ordinal it can renew
-    /// Workload role stamped into renewed SVIDs. Bound from the matched
-    /// placement at issuance, never from the caller (CR-CORE-12 / A5).
-    pub target_role: Option<WorkloadRole>,
     pub issued_at_unix: u64,
     pub expires_at_unix: u64,
     pub signing_key: Zeroizing<Vec<u8>>, // DER-encoded private key
     pub intermediate_cert_der: Vec<u8>,  // The constrained intermediate CA cert
+    /// Workload role stamped into renewed SVIDs. Bound from the matched
+    /// placement at issuance, never from the caller (CR-CORE-12 / A5).
+    pub target_role: Option<WorkloadRole>,
 }
 
 // --- CA Specific Functionality (Only compiled for fleetos-control) ---

@@ -174,13 +174,17 @@ message DelegatedKeyRequest {
 }
 
 message DelegatedKeyResponse {
-  // Variable-length UTF-8 string bytes representing the composite key:
-  // "{node_id}|{target_svid_id}|{target_ordinal_or_none}|{issued_at_unix}"
-  // (Note: NOT the 16-byte BLAKE3 hash defined in fleetos-core::spiffe::DelegationId).
-  bytes delegation_id = 1;
-
-  bytes key_material = 2;   // opaque; control's postcard shadow-struct format
-  uint64 expires_at_unix = 3;
+    // Variable-length UTF-8 string bytes representing the composite key:
+    // "{node_id}|{target_svid_id}|{target_ordinal_or_none}|{issued_at_unix}".
+    // This composite string is the canonical delegation identifier (CR-CORE-12);
+    // control's delegation/id.rs::compute_delegation_id and storage agree on it.
+    bytes delegation_id = 1;
+    // Opaque postcard bytes. Canonical field order (append-only, CR-CORE-12):
+    // node_id, target_svid_id, target_ordinal, issued_at_unix, expires_at_unix,
+    // signing_key, intermediate_cert_der, target_role. Mirrors the field order
+    // of fleetos-core's DelegatedSigningKey.
+    bytes key_material = 2;
+    uint64 expires_at_unix = 3;
 }
 
 // ================= CR-CORE-8: Pod lifecycle events =================
