@@ -35,11 +35,18 @@ message DisruptionBudget {
 // Declarative HPA policy. Absent policy = autoscaling disabled (fail-closed).
 // Consumed read-only by control's HPA controller, which proposes ScaleWorkload.
 message AutoscalingPolicy {
-  bool enabled = 1;
-  uint32 target_cpu_millicores = 2;  // per-pod target utilization
-  uint32 min_replicas = 3;
-  uint32 max_replicas = 4;
-  uint32 stabilization_window_seconds = 5; // scale-down anti-thrash
+    bool enabled = 1;
+
+    // Per-pod targets. A value of 0 means "do not autoscale on this metric".
+    // When enabled == true, at least one target must be > 0.
+    uint32 target_cpu_millicores = 2;
+    uint64 target_memory_bytes = 6;
+    uint64 target_net_rx_bytes_per_sec = 7;
+    uint64 target_net_tx_bytes_per_sec = 8;
+
+    uint32 min_replicas = 3;
+    uint32 max_replicas = 4;
+    uint32 stabilization_window_seconds = 5; // scale-down anti-thrash
 }
 
 enum PlacementMode {
