@@ -13,6 +13,8 @@ message WorkloadSpec {
   UpdateStrategy update_strategy = 7;
   AutoscalingPolicy autoscaling = 8;
   map<string, DisruptionBudget> budgets = 9;
+  // CR-CORE-11: Vertical autoscaling policy.
+  VerticalAutoscalingPolicy vertical_autoscaling = 10;
 }
 
 // Additive: Disruption Budget Value (CR-CTRL-6)
@@ -114,6 +116,39 @@ message PodSpec {
   repeated InitContainer init_containers = 17;
   int32 priority = 18;
   repeated Toleration tolerations = 19;
+}
+
+// Additive: Vertical Autoscaling Policy (CR-CORE-11 / CR-CTRL-11).
+// Consumed read-only by control's VPA controller. Absent policy or
+// enabled == false is a hard stop (fail-closed), same contract as
+// AutoscalingPolicy in CR-CTRL-8.
+message VerticalAutoscalingPolicy {
+    bool enabled = 1;
+
+    enum Mode {
+        // Compute and replicate recommendations only; never mutate footprints.
+        OFF = 0;
+        // Apply recommendations by replacing pods at the new footprint.
+        RECREATE = 1;
+    }
+    Mode mode = 2;
+
+    // Footprint bounds. Control floors min at (1 vcpu, 1 byte) at admission.
+    uint32 min_vcpus = 3;
+    uint32 max_vcpus = 4;
+    uint64 min_memory_bytes = 5;
+    uint64 max_memory_bytes = 6;
+
+    // Target utilization, percent (1-100). Zero disables that dimension.
+    // CPU sizing uses PodMetrics.cpu_millicores; memory uses memory_bytes.
+    uint32 target_cpu_utilization_percent = 7;
+    uint32 target_memory_utilization_percent = 8;
+
+    // Anti-flapping: no action while BOTH dimensions are within ±deadband
+    // of current. Zero means "use control default (10)".
+    uint32 deadband_percent = 9;
+    // Shrinks must be sustained this long before applying. Grows are immediate.
+    uint32 stabilization_window_seconds = 10;
 }
 
 message ContainerPort {

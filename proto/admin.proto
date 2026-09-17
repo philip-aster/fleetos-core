@@ -74,6 +74,30 @@ service AdminService {
   // (ctrl/operator SVIDs) and fail-closed api_version/kind validation
   // are application-side responsibilities of the implementation.
    rpc Apply(ApplyRequest) returns (ApplyResponse);
+
+   // --- CR-CTRL-11: VPA status ---
+   rpc GetVpaStatus(GetVpaStatusRequest) returns (GetVpaStatusResponse);
+}
+
+// ================= CR-CTRL-11: VPA status =================
+message GetVpaStatusRequest {
+    string tenant_id = 1;
+    string workload_id = 2;
+}
+
+message VpaRecommendation {
+    string tenant_id = 1;
+    string workload_id = 2;
+    uint32 recommended_vcpus = 3;
+    uint32 recommended_memory_mb = 4;
+    uint32 current_vcpus = 5;
+    uint32 current_memory_mb = 6;
+    uint64 computed_at_unix = 7;   // leader-computed before Raft proposal
+    string mode = 8;               // "OFF" | "RECREATE"
+}
+
+message GetVpaStatusResponse {
+    VpaRecommendation recommendation = 1; // absent when VPA disabled
 }
 
 // Additive: Force flags for disruptive mutations (CR-CTRL-6)

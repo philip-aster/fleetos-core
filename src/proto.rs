@@ -13,15 +13,16 @@ pub mod admin {
         AuditEntry, ClusterStatus, CreateTenantRequest, CreateTenantResponse, CronWorkloadAck,
         DelegatedKeyRequest, DelegatedKeyResponse, DeleteSagRuleRequest, DeleteWorkloadRequest,
         EvictNodeRequest, GenerateJoinTokenRequest, GenerateJoinTokenResponse,
-        GetClusterStatusRequest, GrantOperatorAccessRequest, ListAuditLogRequest,
-        ListAuditLogResponse, ListNodePoolsRequest, ListNodePoolsResponse, ListNodesRequest,
-        ListNodesResponse, ListOperatorAccessRequest, ListOperatorAccessResponse, NodeAck, NodeId,
-        NodePoolAck, NodePoolCreateRequest, NodePoolDeleteRequest, NodePoolInfo, OperatorAccessAck,
+        GetClusterStatusRequest, GetVpaStatusRequest, GetVpaStatusResponse,
+        GrantOperatorAccessRequest, ListAuditLogRequest, ListAuditLogResponse,
+        ListNodePoolsRequest, ListNodePoolsResponse, ListNodesRequest, ListNodesResponse,
+        ListOperatorAccessRequest, ListOperatorAccessResponse, NodeAck, NodeId, NodePoolAck,
+        NodePoolCreateRequest, NodePoolDeleteRequest, NodePoolInfo, OperatorAccessAck,
         OperatorAccessGrant, OperatorScope, PcrPolicyAck, PcrValueProto, QuotaAck, QuotaRequest,
         QuotaResponse, RegisterNodeEkRequest, RegisterNodeEkResponse, RemoveNodeTaintRequest,
         RevokeNodeEkRequest, RevokeOperatorAccessRequest, SagRuleAck, ScaleWorkloadRequest,
         SecretAck, SecretAclChange, SetNodeTaintsRequest, SetPcrPolicyRequest, StoreSecretRequest,
-        Taint, TenantQuota, UpsertSagRuleRequest, WorkloadSpecAck,
+        Taint, TenantQuota, UpsertSagRuleRequest, VpaRecommendation, WorkloadSpecAck,
     };
 }
 
@@ -106,7 +107,7 @@ pub mod workload {
         ContainerPort, CronSchedule, CronWorkload, DisruptionBudget, DisruptionBudgetValue, EnvVar,
         ExecCheck, HttpGetCheck, PlacementMode, PodSpec, Probe, ProbeSet, ReplaceStrategy,
         ResourceRequirements, RestartPolicy, RollingReplaceStrategy, TcpSocketCheck,
-        TerminationSpec, UpdateStrategy, VolumeMount, WorkloadSpec,
+        TerminationSpec, UpdateStrategy, VerticalAutoscalingPolicy, VolumeMount, WorkloadSpec,
     };
 }
 

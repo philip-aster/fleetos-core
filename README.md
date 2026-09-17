@@ -88,11 +88,11 @@ All gRPC types are generated via `tonic_prost_build` in `build.rs` — not
 | Proto|Services|
 | ---|---|
 | `identity.proto`|`AttestationService` (insecure join-token + secure TPM credential-activation), `CaService`|
-| `admin.proto`|`AdminService` (tenants, workloads, SAG, secrets, nodes, EK registration, PCR policy, quotas, operator access, audit log, node pools, taints, declarative Apply)|
+| `admin.proto`|`AdminService` (tenants, workloads, SAG, secrets, nodes, EK registration, PCR policy, quotas, operator access, audit log, node pools, taints, declarative Apply, VPA status)|
 | `state.proto`|`PolicyService`, `SchedulerService`, `RouterAssignmentService`, `WatchService`, `WorkloadStatusService`, `DelegationService`, `PodEventService`|
 | `secret.proto`|`SecretService`|
 | `provisioning.proto`|`ProvisioningService`|
-| `workload.proto`|Message types only (`WorkloadSpec`, `PodSpec`, `CronWorkload`, `AutoscalingPolicy`, `DisruptionBudget`, `Volume`, `Toleration`, etc.)|
+| `workload.proto`|Message types only (`WorkloadSpec`, `PodSpec`, `CronWorkload`, `AutoscalingPolicy`, `VerticalAutoscalingPolicy`, `DisruptionBudget`, `Volume`, `Toleration`, etc.)|
 | `apply.proto`|Message types for the CR-CTRL-10 declarative Apply API (`Manifest`, `ApplyRequest`/`ApplyResponse`) — the Apply RPC is served by `AdminService`|
 | `debug.proto`|`AgentDebugService`, `OperatorDebugService` (Interactive debugging reverse-tunnel)|
 
