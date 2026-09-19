@@ -45,6 +45,8 @@ traits, types, and conventions; downstream binaries own the I/O.
 | `mesh`|`MeshAddress`, `RouteHint`|
 | `proto`|Tonic-generated gRPC types + identity header framing|
 | `naming`|`dummy_ip_hostname` — canonical service-name → dummy-IP FQDN convention (CR-17)|
+| `vsock_proto`|VSOCK wire contract: `VsockAttestationChallenge`, `VsockAttestationProof`, `AgentAttestResult`, `WorkloadConfig` + volume/route config structs, quote-type constants (incl. `QUOTE_TYPE_HOST_MEASURED = 3`), and `frame_msg`/`decode_msg` postcard framing helpers. Single source of truth for guest ↔ agent handshake; feature-gated `vsock-attest`.
+|
 
 ## Feature Flags
 
@@ -54,7 +56,7 @@ traits, types, and conventions; downstream binaries own the I/O.
 | `tpm`|TPM 2.0 client I/O (`AttestationSession`) + server primitive (`make_credential`, `seal_to_pcr`, `unseal`). Requires system TPM2 TSS libraries.|
 | `software-quote-verify`|Device-free AK signature verification (RSA PKCS#1v1.5 + ECDSA P-256) and PCR-digest binding. Pure Rust — no TPM hardware or system libraries required.|
 | `ca`|CSR construction ( `build_csr` ), SPIFFE SAN extraction/validation, OID extension builders, and delegated (degraded-mode) renewal signing via  `rcgen`  +  `rustls`.|
-| `vsock-attest`|VSOCK attestation for MicroVM boundaries. Declared, not yet implemented.|
+| `vsock-attest`|VSOCK attestation wire protocol for MicroVM boundaries. Carries `vsock_proto`: the shared byte-level contract (challenge/proof/result/config structs + postcard framing) between `fleetos-guest-init` (guest) and `fleetos-agent` (host). Agent-side verifier implementation is blocked on `fleetos-guest-init` hardware quote spec.|
 | `dev`|Mock attestation for integration tests. `compile_error!`-gated behind `RUSTFLAGS='--cfg fleetos_dev'`. Never shippable.|
 | `production`|`tpm` + `vsock-attest` + `ca` + `software-quote-verify`. Everything except `dev`.|
 | `full`|`production` + `dev`.|

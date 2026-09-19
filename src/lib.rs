@@ -2,11 +2,12 @@
 //! fleetos-core: The foundational library crate for FleetOS.
 //! Pure primitives, identity, and protocol layer. Zero I/O side effects.
 
-#![cfg_attr(not(feature = "minimal"), no_std)]
+#![cfg_attr(not(feature = "primitives"), no_std)]
 
 // Explicitly link `alloc` so ubiquitous modules can use `String` and `Vec`
 // directly via `alloc::...` paths in both `no_std` and `std` builds.
-#[cfg(feature = "minimal")]
+#[cfg(feature = "primitives")]
+extern crate alloc;
 #[cfg(all(feature = "dev", not(fleetos_dev)))]
 compile_error!(
     "The `dev` feature is strictly for integration tests and must not be shipped. \
@@ -19,34 +20,38 @@ pub mod time;
 pub mod version;
 
 // Modules requiring alloc (gated out of strict no_std/eBPF profile)
-#[cfg(feature = "minimal")]
+#[cfg(feature = "primitives")]
 pub mod mesh;
-#[cfg(feature = "minimal")]
+#[cfg(feature = "primitives")]
 pub mod operator;
-#[cfg(feature = "minimal")]
+#[cfg(feature = "primitives")]
 pub mod policy;
-#[cfg(feature = "minimal")]
+#[cfg(feature = "primitives")]
 pub mod spiffe;
-#[cfg(feature = "minimal")]
+#[cfg(feature = "primitives")]
 pub mod tenant;
 
 // Heavier modules gated behind features
-#[cfg(feature = "minimal")]
+#[cfg(feature = "primitives")]
 pub mod attestation;
-#[cfg(feature = "minimal")]
+#[cfg(feature = "primitives")]
 pub mod crypto;
-#[cfg(feature = "minimal")]
+#[cfg(feature = "primitives")]
 pub mod naming;
-#[cfg(feature = "minimal")]
+#[cfg(feature = "primitives")]
 pub mod nonce;
-#[cfg(feature = "minimal")]
+
+#[cfg(feature = "grpc")]
 pub mod proto;
+
+#[cfg(feature = "vsock-attest")]
+pub mod vsock_proto;
 
 pub use hash::IdentityFingerprint;
 pub use time::{Expiring, Ttl};
 pub use version::MonotonicVersion;
 
-#[cfg(all(feature = "minimal", feature = "x509-cert", feature = "der"))]
+#[cfg(all(feature = "grpc", feature = "x509-cert", feature = "der"))]
 pub use attestation::EkExtractionError;
 #[cfg(feature = "minimal")]
 pub use attestation::EkFingerprint;

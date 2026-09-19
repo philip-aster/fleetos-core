@@ -8,8 +8,17 @@ use core::str::FromStr;
 // Re-export Zeroizing so the struct definition above compiles cleanly
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+#[cfg(feature = "grpc")]
 use tracing::warn;
 use zeroize::Zeroizing;
+
+#[cfg(not(feature = "grpc"))]
+macro_rules! warn {
+    (target: $target:expr, $($arg:tt)*) => {};
+    ($($arg:tt)*) => {};
+}
+#[cfg(not(feature = "grpc"))]
+use warn;
 
 /// FleetOS IANA Private Enterprise Number (PEN).
 pub const FLEETOS_IANA_PEN: u64 = 66561;
