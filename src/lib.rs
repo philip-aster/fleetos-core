@@ -2,12 +2,10 @@
 //! fleetos-core: The foundational library crate for FleetOS.
 //! Pure primitives, identity, and protocol layer. Zero I/O side effects.
 
-#![cfg_attr(not(feature = "primitives"), no_std)]
-
-// Explicitly link `alloc` so ubiquitous modules can use `String` and `Vec`
-// directly via `alloc::...` paths in both `no_std` and `std` builds.
-#[cfg(feature = "primitives")]
+#![cfg_attr(not(any(feature = "primitives", feature = "vsock-attest")), no_std)]
+#[cfg(any(feature = "primitives", feature = "vsock-attest"))]
 extern crate alloc;
+
 #[cfg(all(feature = "dev", not(fleetos_dev)))]
 compile_error!(
     "The `dev` feature is strictly for integration tests and must not be shipped. \
@@ -34,9 +32,9 @@ pub mod tenant;
 // Heavier modules gated behind features
 #[cfg(feature = "primitives")]
 pub mod attestation;
-#[cfg(feature = "primitives")]
+#[cfg(any(feature = "primitives", feature = "vsock-attest"))]
 pub mod crypto;
-#[cfg(feature = "primitives")]
+#[cfg(any(feature = "primitives", feature = "vsock-attest"))]
 pub mod naming;
 #[cfg(feature = "primitives")]
 pub mod nonce;

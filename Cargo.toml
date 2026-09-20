@@ -11,7 +11,7 @@ default = ["minimal"]
 
 primitives = [
     "dep:rand", "dep:chacha20poly1305", "dep:zeroize", "dep:x25519-dalek",
-    "dep:serde_json", "dep:bytes", "dep:serde", "dep:blake3", "dep:bytemuck",
+    "dep:serde_json", "dep:bytes", "dep:serde", "dep:blake3",
     "dep:thiserror", "dep:async-trait"
 ]
 
@@ -24,7 +24,14 @@ grpc = [
 minimal = ["grpc"]
 # Attestation backends (all imply `minimal` so they have SpiffeId/Hash/Proto)
 tpm = ["minimal", "dep:tss-esapi", "dep:sha2", "dep:spki"]
-vsock-attest = ["primitives", "dep:postcard", "dep:serde"]
+vsock-attest = [
+    "dep:postcard",
+    "dep:serde",
+    "dep:x25519-dalek",
+    "dep:rand",
+    "dep:zeroize",
+    "dep:thiserror",
+]
 
 # CR-14/A4: software quote-signature verification (RSA + ECDSA), device-free.
 # Deliberately NOT under `tpm` — it must run in CI with no swtpm/hardware.
@@ -55,7 +62,7 @@ spki = ["dep:spki"]
 async-trait = { version = "0.1.92", optional = true }
 base64 = { version = "0.23.1", optional = true }
 blake3 = { version = "1.8.6", optional = true, default-features = false }
-bytemuck = { version = "1.25.2", optional = true, default-features = false, features = ["derive"] }
+bytemuck = { version = "1.25.2", default-features = false, features = ["derive"] }
 bytes = { version = "1.12.1", optional = true }
 chacha20poly1305 = { version = "0.11.0", optional = true }
 der = { version = "0.8.1", optional = true }
@@ -82,7 +89,7 @@ vsock = { version = "0.5.4", optional = true }
 x25519-dalek = { version = "3.0.0", default-features = false, features = ["getrandom", "static_secrets"], optional = true }
 x509-cert = { version = "0.3.0", default-features = false, features = ["builder"], optional = true }
 x509-parser = { version = "0.18.1", optional = true }
-zeroize = { version = "1.9.0", default-features = false, features = ["zeroize_derive"], optional = true }
+zeroize = { version = "1.9.0", default-features = false, features = ["zeroize_derive", "alloc"], optional = true }
 
 [build-dependencies]
 tonic-prost-build = "0.14.6"

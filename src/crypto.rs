@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 //! Hand-assembled HPKE-style sealing (X25519 + ChaCha20Poly1305).
 
+// These imports are only needed by seal/unseal
+#[cfg(feature = "primitives")]
 use chacha20poly1305::{
     ChaCha20Poly1305,
     Key,
@@ -8,7 +10,9 @@ use chacha20poly1305::{
     aead::{Aead, KeyInit, Payload},
 };
 use thiserror::Error;
-use x25519_dalek::{EphemeralSecret, PublicKey, StaticSecret};
+#[cfg(feature = "primitives")]
+use x25519_dalek::EphemeralSecret;
+use x25519_dalek::{PublicKey, StaticSecret};
 use zeroize::Zeroizing;
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
@@ -58,6 +62,7 @@ pub struct SealedSecret {
 }
 
 /// Ephemeral X25519 key agreement against recipient SVID public key, ChaCha20Poly1305 AEAD.
+#[cfg(feature = "primitives")]
 pub fn seal(
     recipient_pubkey: &RecipientX25519Pubkey,
     plaintext: &[u8],
@@ -113,6 +118,7 @@ pub fn seal(
     })
 }
 
+#[cfg(feature = "primitives")]
 pub fn unseal(
     recipient_privkey: &[u8; 32],
     sealed: &SealedSecret,

@@ -17,8 +17,6 @@ macro_rules! warn {
     (target: $target:expr, $($arg:tt)*) => {};
     ($($arg:tt)*) => {};
 }
-#[cfg(not(feature = "grpc"))]
-use warn;
 
 /// FleetOS IANA Private Enterprise Number (PEN).
 pub const FLEETOS_IANA_PEN: u64 = 66561;
@@ -480,10 +478,10 @@ pub fn extract_role(cert_der: &[u8]) -> Option<WorkloadRole> {
 
     match WorkloadRole::try_from(role_str) {
         Ok(role) => Some(role),
-        Err(e) => {
+        Err(_e) => {
             warn!(
                 target: "fleetos::spiffe::extract_role",
-                error = %e,
+                error = %_e,
                 "Role extension present in SVID but failed validation."
             );
             None
