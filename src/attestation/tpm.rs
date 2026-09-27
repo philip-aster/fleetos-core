@@ -32,8 +32,11 @@ pub enum TpmEndpoint {
 }
 
 use std::str::FromStr;
-use tss_esapi::interface_types::resource_handles::Hierarchy;
-use tss_esapi::structures::{Digest, Name};
+use tss_esapi::attributes::ObjectAttributesBuilder;
+use tss_esapi::interface_types::{
+    algorithm::HashingAlgorithm, resource_handles::Hierarchy, session_handles::PolicySession,
+};
+use tss_esapi::structures::{Digest, KeyedHashScheme, Name, Public, PublicKeyedHashParameters};
 use zeroize::Zeroizing;
 
 /// Build the TCTI configuration string from a `TpmEndpoint`.
@@ -82,6 +85,9 @@ pub fn make_credential(
     let (id_object, enc_secret) = context
         .make_credential(ek_handle, credential, ak_name)
         .map_err(|e| TssError::Esapi(format!("make_credential failed: {}", e)))?;
+
+    // Free the externally loaded EK public key object.
+    let _ = context.flush_context(ek_handle.into());
 
     Ok((id_object.value().to_vec(), enc_secret.value().to_vec()))
 }
@@ -368,13 +374,13 @@ impl AttestationSession {
             .ok_or_else(|| TssError::Esapi("failed to allocate ek policy session".into()))?;
 
         // 2. Convert AuthSession → PolicySession for policy_secret.
-        let ek_policy_session =
+        let ek_policy_session: PolicySession =
             ek_policy_auth_session
                 .try_into()
                 .map_err(|e: tss_esapi::Error| {
                     TssError::Esapi(format!("policy session convert: {}", e))
                 })?;
-
+        let ek_session_flush: tss_esapi::handles::SessionHandle = ek_policy_session.into();
         // 3. Satisfy the EK's authPolicy: PolicySecret(TPM_RH_ENDORSEMENT).
         let endorsement_auth: tss_esapi::handles::AuthHandle =
             tss_esapi::handles::ObjectHandle::from(Hierarchy::Endorsement).into();
@@ -405,6 +411,9 @@ impl AttestationSession {
             .context
             .activate_credential(ak_handle, ek_handle, id_object, enc_secret)
             .map_err(|e| TssError::Esapi(format!("activate_credential failed: {}", e)))?;
+
+        // Actually flush the EK policy session from the TPM.
+        let _ = self.context.flush_context(ek_session_flush.into());
 
         // SECURITY/STABILITY: Clear sessions to flush the EK policy session from
         // the TPM. Failing to do so leaks TPM session handles (causing
@@ -490,6 +499,15 @@ impl AttestationSession {
             }
         }
         Ok(out)
+    }
+}
+
+impl Drop for AttestationSession {
+    fn drop(&mut self) {
+        // swtpm never reclaims loaded primaries on its own; flush both keys
+        // so repeated attestation sessions don't exhaust object contexts.
+        let _ = self.context.flush_context(self.ak_handle.into());
+        let _ = self.context.flush_context(self.ek_handle.into());
     }
 }
 
@@ -830,30 +848,31 @@ fn compute_pcr_policy_digest(
 
 /// Sealed-data keyedhash object template: data-only, policy-gated, no
 /// sign/decrypt/userWithAuth.
-fn sealed_object_template(
-    policy_digest: tss_esapi::structures::Digest,
-) -> Result<tss_esapi::structures::Public, TssError> {
-    use tss_esapi::attributes::ObjectAttributes;
-    use tss_esapi::interface_types::algorithm::HashingAlgorithm;
-    use tss_esapi::structures::{KeyedHashScheme, Public, PublicKeyedHashParameters};
-    let attrs = ObjectAttributes::builder()
+fn sealed_object_template(policy_digest: Digest, seal_data: &[u8]) -> Result<Public, TssError> {
+    let attrs = ObjectAttributesBuilder::new()
         .with_fixed_tpm(true)
         .with_fixed_parent(true)
         .with_admin_with_policy(true)
         .build()
         .map_err(|e| TssError::Esapi(format!("sealed object attrs: {}", e)))?;
+
     Ok(Public::KeyedHash {
         name_hashing_algorithm: HashingAlgorithm::Sha256,
         object_attributes: attrs,
         auth_policy: policy_digest,
         parameters: PublicKeyedHashParameters::new(KeyedHashScheme::Null),
-        unique: Default::default(), // empty for externally-supplied data
+        unique: Digest::try_from(seal_data.to_vec())
+            .map_err(|e| TssError::Esapi(format!("seal unique: {}", e)))?,
     })
 }
 
 /// TPM2_Seal: seal `plaintext` under the Owner hierarchy, bound to the given
 /// PCR indices. The blob can only be unsealed on this TPM while the selected
 /// PCRs hold their current values.
+/// Seal `plaintext` under the given PCR indices.
+///
+/// **Size limit**: `plaintext` must be ≤ 64 bytes (TPM2B_DIGEST max).
+/// For larger payloads, seal a random key and encrypt out-of-band.
 pub fn seal_to_pcr(
     endpoint: &TpmEndpoint,
     plaintext: &[u8],
@@ -875,7 +894,7 @@ pub fn seal_to_pcr(
 
     let policy_digest = compute_pcr_policy_digest(&mut context, &selection)?;
     let srk = create_srk(&mut context)?;
-    let template = sealed_object_template(policy_digest)?;
+    let template = sealed_object_template(policy_digest, plaintext)?;
 
     // 1. Convert plaintext bytes into the proper SensitiveData buffer wrapper.
     let data = tss_esapi::structures::SensitiveData::try_from(plaintext.to_vec())
@@ -894,6 +913,12 @@ pub fn seal_to_pcr(
             )
         })
         .map_err(|e| TssError::Esapi(format!("TPM2_Create (seal) failed: {}", e)))?;
+
+    // Free the transient SRK object slot. swtpm has no in-kernel resource
+    // manager, so a loaded object is never reclaimed when the Context drops;
+    // without this flush every seal/unseal leaks a slot until the TPM
+    // rejects TPM2_Load with TPM_RC_MEMORY (0x902).
+    let _ = context.flush_context(srk.into());
 
     let private = created.out_private.value().to_vec();
     let public = created
@@ -976,9 +1001,15 @@ pub fn unseal(endpoint: &TpmEndpoint, sealed: &SealedBlob) -> Result<Zeroizing<V
         .unseal(obj.into())
         .map_err(|e| TssError::Esapi(format!("TPM2_Unseal failed: {}", e)))?;
 
+    // Free the two transient object slots (sealed object + SRK) — same
+    // swtpm slot-leak rationale as seal_to_pcr.
+    let _ = context.flush_context(obj.into());
+    let _ = context.flush_context(srk.into());
+    let policy_flush: tss_esapi::handles::SessionHandle = policy_session.into();
+    let _ = context.flush_context(policy_flush.into());
+
     // Flush sessions (mirrors activate()'s hygiene note).
     context.set_sessions((None, None, None));
-
     Ok(Zeroizing::new(data.value().to_vec()))
 }
 
