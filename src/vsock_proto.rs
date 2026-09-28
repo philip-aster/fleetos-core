@@ -72,6 +72,9 @@ pub struct DummyIpRouteConfig {
 /// Framing helper: encodes a message into `[u32 LE length][postcard payload]`.
 pub fn frame_msg<T: Serialize>(msg: &T) -> Result<Vec<u8>, postcard::Error> {
     let payload = postcard::to_allocvec(msg)?;
+    if payload.len() > MAX_MESSAGE_BYTES {
+        return Err(postcard::Error::SerializeBufferFull);
+    }
     let len = (payload.len() as u32).to_le_bytes();
     let mut framed = Vec::with_capacity(4 + payload.len());
     framed.extend_from_slice(&len);
