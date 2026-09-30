@@ -33,6 +33,7 @@ pub enum TpmEndpoint {
 
 use std::str::FromStr;
 use tss_esapi::attributes::ObjectAttributesBuilder;
+use tss_esapi::handles::{KeyHandle, ObjectHandle};
 use tss_esapi::interface_types::{
     algorithm::HashingAlgorithm, resource_handles::Hierarchy, session_handles::PolicySession,
 };
@@ -1011,6 +1012,599 @@ pub fn unseal(endpoint: &TpmEndpoint, sealed: &SealedBlob) -> Result<Zeroizing<V
     // Flush sessions (mirrors activate()'s hygiene note).
     context.set_sessions((None, None, None));
     Ok(Zeroizing::new(data.value().to_vec()))
+}
+
+// ================= CORE-WI-3: TpmContextManager =================
+//
+// Manages a single TPM context with context save/load for transient
+// slot management.
+//
+// For Device backend (/dev/tpmrm0): the kernel resource manager handles
+// context management transparently. This manager operates as a passthrough.
+//
+// For Swtpm/Mssim backends: actively manages contexts, saving loaded
+// objects to memory when slots are needed and reloading them on demand.
+//
+// tss_esapi::Context is NOT Send/Sync. The manager is inherently
+// single-threaded. Consumers must use it from one thread at a time.
+
+use tss_esapi::utils::TpmsContext;
+
+/// Internal: tracks whether a key is loaded in the TPM or saved to memory.
+enum KeyState {
+    /// Key is loaded in the TPM as a transient object.
+    /// Only used for Device backend (kernel RM manages slots).
+    Live(ObjectHandle),
+    /// Key's context has been saved and the TPM slot freed.
+    /// Used for swtpm/mssim backends.
+    Saved(TpmsContext),
+}
+
+/// A managed attestation session that coordinates with TpmContextManager
+/// for transient slot management.
+///
+/// Unlike `AttestationSession`, this does NOT own a `Context`. All TPM
+/// operations go through the `TpmContextManager` that created it.
+///
+/// When done, call `TpmContextManager::finish_attestation(session)` to
+/// release resources. If dropped without calling finish, the parent
+/// manager's Context drop will eventually clean up.
+pub struct ManagedAttestationSession {
+    ek_state: KeyState,
+    ak_state: KeyState,
+    ak_pub: Vec<u8>,
+    ek_spki: Vec<u8>,
+}
+
+impl ManagedAttestationSession {
+    /// Marshaled TPMT_PUBLIC of the Attestation Key.
+    pub fn ak_pub(&self) -> &[u8] {
+        &self.ak_pub
+    }
+
+    /// EK public key in SPKI DER format.
+    pub fn ek_pub(&self) -> &[u8] {
+        &self.ek_spki
+    }
+}
+
+/// Manages a single TPM context with context save/load for transient
+/// slot management.
+///
+/// # Example
+///
+/// ```ignore
+/// let mut mgr = TpmContextManager::new(&endpoint)?;
+/// let mut session = mgr.begin_attestation()?;
+///
+/// // Seal while session is active — this was the original failure case
+/// let sealed = mgr.seal_to_pcr(&plaintext, &[0, 7, 9])?;
+/// let recovered = mgr.unseal(&sealed)?;
+///
+/// // Activate credential using the session's EK+AK
+/// let secret = mgr.activate(&mut session, &credential_blob, &enc_secret)?;
+///
+/// // Quote using the session's AK
+/// let quote = mgr.quote(&mut session, &nonce, &[0, 7, 9])?;
+///
+/// // Clean up
+/// mgr.finish_attestation(session)?;
+/// ```
+pub struct TpmContextManager {
+    context: tss_esapi::Context,
+    has_resource_manager: bool,
+}
+
+impl TpmContextManager {
+    /// Create a new context manager for the given TPM endpoint.
+    pub fn new(endpoint: &TpmEndpoint) -> Result<Self, TssError> {
+        let context = create_context(endpoint)?;
+        let has_resource_manager = matches!(endpoint, TpmEndpoint::Device { .. });
+        Ok(Self {
+            context,
+            has_resource_manager,
+        })
+    }
+
+    /// Ensure a key is loaded in the TPM. Returns the handle.
+    ///
+    /// For Device backend, returns the existing handle (no-op).
+    /// For swtpm/mssim, loads from saved context if needed.
+    fn ensure_loaded(&mut self, state: &mut KeyState) -> Result<ObjectHandle, TssError> {
+        match state {
+            KeyState::Live(handle) => Ok(*handle),
+            KeyState::Saved(saved) => {
+                // Clone in case load fails — we want to keep the saved context
+                let handle = self
+                    .context
+                    .context_load(saved.clone())
+                    .map_err(|e| TssError::Esapi(format!("context_load failed: {}", e)))?;
+                let obj_handle = handle;
+                *state = KeyState::Live(obj_handle);
+                Ok(obj_handle)
+            }
+        }
+    }
+
+    /// Save a key's context and free its TPM slot (swtpm/mssim only).
+    ///
+    /// For Device backend, this is a no-op (kernel RM manages slots).
+    /// For swtpm/mssim, saves the context and flushes the handle to free the transient slot.
+    fn save_if_needed(&mut self, state: &mut KeyState) -> Result<(), TssError> {
+        if self.has_resource_manager {
+            return Ok(());
+        }
+        match state {
+            KeyState::Live(handle) => {
+                let saved = self
+                    .context
+                    .context_save(*handle)
+                    .map_err(|e| TssError::Esapi(format!("context_save failed: {}", e)))?;
+                // TPM2_ContextSave does NOT evict the object from the TPM.
+                // We must explicitly flush the handle to free the transient slot.
+                let _ = self.context.flush_context(*handle);
+                *state = KeyState::Saved(saved);
+                Ok(())
+            }
+            KeyState::Saved(_) => Ok(()), // already saved
+        }
+    }
+
+    /// Begin an attestation session, creating ephemeral EK and AK.
+    ///
+    /// For swtpm/mssim: EK and AK contexts are saved immediately after
+    /// creation, freeing all transient slots for subsequent operations.
+    ///
+    /// For Device backend: EK and AK remain loaded (kernel RM manages slots).
+    pub fn begin_attestation(&mut self) -> Result<ManagedAttestationSession, TssError> {
+        // Create EK primary
+        let ek_public = ek_template()?;
+        let ek_result = self
+            .context
+            .execute_with_nullauth_session(|ctx| {
+                ctx.create_primary(Hierarchy::Endorsement, ek_public, None, None, None, None)
+            })
+            .map_err(|e| TssError::Esapi(format!("create EK primary failed: {}", e)))?;
+
+        // Create AK primary
+        let ak_public = ak_template()?;
+        let ak_result = self
+            .context
+            .execute_with_nullauth_session(|ctx| {
+                ctx.create_primary(Hierarchy::Endorsement, ak_public, None, None, None, None)
+            })
+            .map_err(|e| TssError::Esapi(format!("create AK primary failed: {}", e)))?;
+
+        // Extract public keys
+        let ak_pub = ak_result
+            .out_public
+            .marshall()
+            .map_err(|e| TssError::InvalidAk(format!("marshal AK public failed: {}", e)))?;
+        let (ek_modulus, ek_exponent) = extract_rsa_public(&ek_result.out_public)?;
+        let ek_spki = rsa_public_to_spki(&ek_modulus, ek_exponent);
+
+        let ek_handle: ObjectHandle = ek_result.key_handle.into();
+        let ak_handle: ObjectHandle = ak_result.key_handle.into();
+
+        if self.has_resource_manager {
+            // Device backend: keep handles live, kernel RM manages slots
+            Ok(ManagedAttestationSession {
+                ek_state: KeyState::Live(ek_handle),
+                ak_state: KeyState::Live(ak_handle),
+                ak_pub,
+                ek_spki,
+            })
+        } else {
+            // swtpm/mssim: save contexts and flush handles to free transient slots.
+            // TPM2_ContextSave does NOT evict the object, so we must flush explicitly.
+            let ek_saved = self
+                .context
+                .context_save(ek_handle)
+                .map_err(|e| TssError::Esapi(format!("save EK context: {}", e)))?;
+            let _ = self.context.flush_context(ek_handle);
+
+            let ak_saved = self
+                .context
+                .context_save(ak_handle)
+                .map_err(|e| TssError::Esapi(format!("save AK context: {}", e)))?;
+            let _ = self.context.flush_context(ak_handle);
+
+            Ok(ManagedAttestationSession {
+                ek_state: KeyState::Saved(ek_saved),
+                ak_state: KeyState::Saved(ak_saved),
+                ak_pub,
+                ek_spki,
+            })
+        }
+    }
+
+    /// Finish an attestation session, releasing resources.
+    ///
+    /// For Device backend: flushes EK and AK handles.
+    /// For swtpm/mssim: saved contexts are dropped (not in TPM).
+    pub fn finish_attestation(
+        &mut self,
+        session: ManagedAttestationSession,
+    ) -> Result<(), TssError> {
+        match session.ek_state {
+            KeyState::Live(handle) => {
+                let _ = self.context.flush_context(handle);
+            }
+            KeyState::Saved(_) => {} // not in TPM, nothing to flush
+        }
+        match session.ak_state {
+            KeyState::Live(handle) => {
+                let _ = self.context.flush_context(handle);
+            }
+            KeyState::Saved(_) => {}
+        }
+        Ok(())
+    }
+
+    /// Activate a credential using the session's EK and AK.
+    ///
+    /// This is the node-side half of TPM2_MakeCredential. The server
+    /// encrypted a secret to the EK, bound to the AK name. This recovers it.
+    pub fn activate(
+        &mut self,
+        session: &mut ManagedAttestationSession,
+        credential_blob: &[u8],
+        secret: &[u8],
+    ) -> Result<Vec<u8>, TssError> {
+        // Inner function does the work; outer ensures cleanup on all paths
+        let result = self.activate_inner(session, credential_blob, secret);
+
+        // Always save keys back, regardless of success/failure
+        let _ = self.save_if_needed(&mut session.ak_state);
+        let _ = self.save_if_needed(&mut session.ek_state);
+
+        result
+    }
+
+    fn activate_inner(
+        &mut self,
+        session: &mut ManagedAttestationSession,
+        credential_blob: &[u8],
+        secret: &[u8],
+    ) -> Result<Vec<u8>, TssError> {
+        use tss_esapi::constants::SessionType;
+        use tss_esapi::interface_types::algorithm::{HashingAlgorithm, SymmetricMode};
+        use tss_esapi::interface_types::key_bits::AesKeyBits;
+        use tss_esapi::interface_types::resource_handles::Hierarchy;
+        use tss_esapi::interface_types::session_handles::AuthSession;
+        use tss_esapi::structures::{
+            Digest, EncryptedSecret, IdObject, Nonce, SymmetricDefinition,
+        };
+
+        // Load both AK and EK
+        let ak_handle = self.ensure_loaded(&mut session.ak_state)?;
+        let ek_handle = self.ensure_loaded(&mut session.ek_state)?;
+
+        let id_object = IdObject::try_from(credential_blob.to_vec())
+            .map_err(|e| TssError::Esapi(format!("bad credentialBlob: {}", e)))?;
+        let enc_secret = EncryptedSecret::try_from(secret.to_vec())
+            .map_err(|e| TssError::Esapi(format!("bad secret: {}", e)))?;
+
+        // 1. Start a policy session for the EK (Template L-1 authPolicy)
+        let ek_policy_auth_session = self
+            .context
+            .start_auth_session(
+                None,
+                None,
+                None,
+                SessionType::Policy,
+                SymmetricDefinition::Aes {
+                    key_bits: AesKeyBits::Aes128,
+                    mode: SymmetricMode::Cfb,
+                },
+                HashingAlgorithm::Sha256,
+            )
+            .map_err(|e| TssError::Esapi(format!("start ek policy session: {}", e)))?
+            .ok_or_else(|| TssError::Esapi("failed to allocate ek policy session".into()))?;
+
+        // 2. Convert AuthSession → PolicySession for policy_secret
+        let ek_policy_session: PolicySession =
+            ek_policy_auth_session
+                .try_into()
+                .map_err(|e: tss_esapi::Error| {
+                    TssError::Esapi(format!("policy session convert: {}", e))
+                })?;
+
+        // 3. Satisfy the EK's authPolicy: PolicySecret(TPM_RH_ENDORSEMENT)
+        let endorsement_auth: tss_esapi::handles::AuthHandle =
+            tss_esapi::handles::ObjectHandle::from(Hierarchy::Endorsement).into();
+        self.context
+            .execute_with_nullauth_session(|ctx| {
+                ctx.policy_secret(
+                    ek_policy_session,
+                    endorsement_auth,
+                    Nonce::default(),
+                    Digest::default(),
+                    Nonce::default(),
+                    None,
+                )
+            })
+            .map_err(|e| TssError::Esapi(format!("policy secret failed: {}", e)))?;
+
+        // 4. Set sessions for ActivateCredential
+        self.context.set_sessions((
+            Some(AuthSession::Password),
+            Some(ek_policy_auth_session),
+            None,
+        ));
+
+        // Convert ObjectHandle to KeyHandle for activate_credential
+        let ak_key_handle = KeyHandle::from(ak_handle);
+        let ek_key_handle = KeyHandle::from(ek_handle);
+
+        let recovered = self
+            .context
+            .activate_credential(ak_key_handle, ek_key_handle, id_object, enc_secret)
+            .map_err(|e| TssError::Esapi(format!("activate_credential failed: {}", e)))?;
+
+        // Flush the EK policy session
+        let ek_session_flush: tss_esapi::handles::SessionHandle = ek_policy_session.into();
+        let _ = self.context.flush_context(ek_session_flush.into());
+
+        // Clear sessions
+        self.context.set_sessions((None, None, None));
+
+        Ok(recovered.value().to_vec())
+    }
+
+    /// Generate a TPM quote using the session's AK.
+    pub fn quote(
+        &mut self,
+        session: &mut ManagedAttestationSession,
+        server_nonce: &[u8],
+        pcr_indices: &[u8],
+    ) -> Result<QuoteOutput, TssError> {
+        let result = self.quote_inner(session, server_nonce, pcr_indices);
+
+        // Always save AK back
+        let _ = self.save_if_needed(&mut session.ak_state);
+
+        result
+    }
+
+    fn quote_inner(
+        &mut self,
+        session: &mut ManagedAttestationSession,
+        server_nonce: &[u8],
+        pcr_indices: &[u8],
+    ) -> Result<QuoteOutput, TssError> {
+        use tss_esapi::interface_types::algorithm::HashingAlgorithm;
+        use tss_esapi::structures::{Data, PcrSelectionListBuilder, PcrSlot, SignatureScheme};
+
+        let ak_handle = self.ensure_loaded(&mut session.ak_state)?;
+
+        let slots: Vec<PcrSlot> = pcr_indices
+            .iter()
+            .map(|&i| pcr_slot_from_index(i))
+            .collect::<Result<Vec<_>, _>>()?;
+        let selection = PcrSelectionListBuilder::new()
+            .with_selection(HashingAlgorithm::Sha256, &slots)
+            .build()
+            .map_err(|e| TssError::Esapi(format!("bad PCR selection: {}", e)))?;
+        let qualifying: Data = server_nonce
+            .to_vec()
+            .try_into()
+            .map_err(|e| TssError::Esapi(format!("bad nonce: {}", e)))?;
+
+        let ak_key_handle = KeyHandle::from(ak_handle);
+
+        let (attest, signature) = self
+            .context
+            .execute_with_nullauth_session(move |ctx| {
+                ctx.quote(ak_key_handle, qualifying, SignatureScheme::Null, selection)
+            })
+            .map_err(|e| TssError::Esapi(format!("TPM2_Quote failed: {}", e)))?;
+
+        let quote_bytes = attest
+            .marshall()
+            .map_err(|e| TssError::Esapi(format!("marshal attest failed: {}", e)))?;
+        let pcr_values = self.read_pcr_values(pcr_indices)?;
+
+        Ok(QuoteOutput {
+            quote: quote_bytes,
+            signature: marshal_signature(&signature)?,
+            pcr_values,
+        })
+    }
+
+    /// Read PCR values from the TPM.
+    fn read_pcr_values(&mut self, pcr_indices: &[u8]) -> Result<Vec<PcrValue>, TssError> {
+        use tss_esapi::interface_types::algorithm::HashingAlgorithm;
+        use tss_esapi::structures::{PcrSelectionListBuilder, PcrSlot};
+
+        let slots: Vec<PcrSlot> = pcr_indices
+            .iter()
+            .map(|&i| pcr_slot_from_index(i))
+            .collect::<Result<Vec<_>, _>>()?;
+        let selection = PcrSelectionListBuilder::new()
+            .with_selection(HashingAlgorithm::Sha256, &slots)
+            .build()
+            .map_err(|e| TssError::Esapi(format!("bad PCR selection: {}", e)))?;
+
+        let (_, _, pcr_data) = self
+            .context
+            .pcr_read(selection)
+            .map_err(|e| TssError::Esapi(format!("PCR read failed: {}", e)))?;
+
+        let digests = pcr_data.value();
+        let mut out = Vec::new();
+        for (i, &idx) in pcr_indices.iter().enumerate() {
+            if i < digests.len() {
+                out.push(PcrValue {
+                    index: idx,
+                    hash_algorithm: 0x000B, // SHA-256
+                    digest: digests[i].value().to_vec(),
+                });
+            }
+        }
+        Ok(out)
+    }
+
+    /// Read the EK certificate from NV index (if present).
+    pub fn read_ek_cert(&mut self) -> Result<Option<Vec<u8>>, TssError> {
+        use tss_esapi::handles::NvIndexHandle;
+        use tss_esapi::interface_types::resource_handles::NvAuth;
+
+        let nv_handle = NvIndexHandle::from(0x01C0_0002u32);
+        match self.context.nv_read(NvAuth::Owner, nv_handle, 2048, 0) {
+            Ok(data) => Ok(Some(data.value().to_vec())),
+            Err(_) => Ok(None),
+        }
+    }
+
+    /// Seal plaintext under the given PCR indices.
+    ///
+    /// This can be called while a ManagedAttestationSession is active —
+    /// the manager coordinates slot usage.
+    pub fn seal_to_pcr(
+        &mut self,
+        plaintext: &[u8],
+        pcr_indices: &[u8],
+    ) -> Result<SealedBlob, TssError> {
+        use tss_esapi::interface_types::algorithm::HashingAlgorithm;
+        use tss_esapi::structures::{PcrSelectionListBuilder, PcrSlot};
+        use tss_esapi::traits::Marshall;
+
+        let slots: Vec<PcrSlot> = pcr_indices
+            .iter()
+            .map(|&i| pcr_slot_from_index(i))
+            .collect::<Result<Vec<_>, _>>()?;
+        let selection = PcrSelectionListBuilder::new()
+            .with_selection(HashingAlgorithm::Sha256, &slots)
+            .build()
+            .map_err(|e| TssError::Esapi(format!("bad PCR selection: {}", e)))?;
+
+        let policy_digest = compute_pcr_policy_digest(&mut self.context, &selection)?;
+        let srk = create_srk_in(&mut self.context)?;
+        let template = sealed_object_template(policy_digest, plaintext)?;
+
+        let data = tss_esapi::structures::SensitiveData::try_from(plaintext.to_vec())
+            .map_err(|e| TssError::Esapi(format!("sensitive data error: {}", e)))?;
+
+        let created = self
+            .context
+            .execute_with_nullauth_session(|ctx| {
+                ctx.create(srk, template, None, Some(data), None, None)
+            })
+            .map_err(|e| TssError::Esapi(format!("TPM2_Create (seal) failed: {}", e)))?;
+
+        // Free the transient SRK object slot
+        let _ = self.context.flush_context(srk.into());
+
+        let private = created.out_private.value().to_vec();
+        let public = created
+            .out_public
+            .marshall()
+            .map_err(|e| TssError::Esapi(format!("marshal sealed public: {}", e)))?;
+
+        Ok(SealedBlob {
+            private,
+            public,
+            pcr_indices: pcr_indices.to_vec(),
+        })
+    }
+
+    /// Unseal a previously sealed blob.
+    ///
+    /// Succeeds only if the selected PCRs still hold the values they had
+    /// at seal time.
+    pub fn unseal(&mut self, sealed: &SealedBlob) -> Result<Zeroizing<Vec<u8>>, TssError> {
+        use tss_esapi::constants::SessionType;
+        use tss_esapi::interface_types::algorithm::{HashingAlgorithm, SymmetricMode};
+        use tss_esapi::interface_types::key_bits::AesKeyBits;
+        use tss_esapi::interface_types::session_handles::PolicySession;
+        use tss_esapi::structures::{
+            Digest, PcrSelectionListBuilder, PcrSlot, Private, Public, SymmetricDefinition,
+        };
+        use tss_esapi::traits::UnMarshall;
+
+        let srk = create_srk_in(&mut self.context)?;
+
+        let private = Private::try_from(sealed.private.clone())
+            .map_err(|e| TssError::Esapi(format!("bad private blob: {}", e)))?;
+        let public = Public::unmarshall(&sealed.public)
+            .map_err(|e| TssError::Esapi(format!("bad public blob: {}", e)))?;
+
+        let obj = self
+            .context
+            .execute_with_nullauth_session(|ctx| ctx.load(srk, private, public))
+            .map_err(|e| TssError::Esapi(format!("TPM2_Load failed: {}", e)))?;
+
+        // Reconstruct the PCR selection and satisfy the policy
+        let slots: Vec<PcrSlot> = sealed
+            .pcr_indices
+            .iter()
+            .map(|&i| pcr_slot_from_index(i))
+            .collect::<Result<Vec<_>, _>>()?;
+        let selection = PcrSelectionListBuilder::new()
+            .with_selection(HashingAlgorithm::Sha256, &slots)
+            .build()
+            .map_err(|e| TssError::Esapi(format!("bad PCR selection: {}", e)))?;
+
+        let policy_auth = self
+            .context
+            .start_auth_session(
+                None,
+                None,
+                None,
+                SessionType::Policy,
+                SymmetricDefinition::Aes {
+                    key_bits: AesKeyBits::Aes128,
+                    mode: SymmetricMode::Cfb,
+                },
+                HashingAlgorithm::Sha256,
+            )
+            .map_err(|e| TssError::Esapi(format!("start policy session: {}", e)))?
+            .ok_or_else(|| TssError::Esapi("failed to allocate policy session".into()))?;
+
+        let policy_session: PolicySession = policy_auth
+            .try_into()
+            .map_err(|e: tss_esapi::Error| TssError::Esapi(format!("policy convert: {}", e)))?;
+
+        self.context
+            .execute_with_nullauth_session(|ctx| {
+                ctx.policy_pcr(policy_session, Digest::default(), selection)
+            })
+            .map_err(|e| TssError::Esapi(format!("policy_pcr (unseal) failed: {}", e)))?;
+
+        // Session 1 (obj auth) must be the satisfied policy session
+        self.context.set_sessions((Some(policy_auth), None, None));
+
+        let data = self
+            .context
+            .unseal(obj.into())
+            .map_err(|e| TssError::Esapi(format!("TPM2_Unseal failed: {}", e)))?;
+
+        // Free transient object slots
+        let _ = self.context.flush_context(obj.into());
+        let _ = self.context.flush_context(srk.into());
+        let policy_flush: tss_esapi::handles::SessionHandle = policy_session.into();
+        let _ = self.context.flush_context(policy_flush.into());
+
+        // Flush sessions
+        self.context.set_sessions((None, None, None));
+
+        Ok(Zeroizing::new(data.value().to_vec()))
+    }
+}
+
+/// Helper to create SRK within an existing context.
+fn create_srk_in(
+    context: &mut tss_esapi::Context,
+) -> Result<tss_esapi::handles::KeyHandle, TssError> {
+    use tss_esapi::interface_types::resource_handles::Hierarchy;
+    let template = srk_template()?;
+    let result = context
+        .execute_with_nullauth_session(|ctx| {
+            ctx.create_primary(Hierarchy::Owner, template, None, None, None, None)
+        })
+        .map_err(|e| TssError::Esapi(format!("create SRK primary failed: {}", e)))?;
+    Ok(result.key_handle)
 }
 
 #[cfg(test)]

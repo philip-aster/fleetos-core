@@ -83,4 +83,6 @@ pub use naming::dummy_ip_hostname;
 #[cfg(all(feature = "minimal", feature = "software-quote-verify"))]
 pub use attestation::quote::verify_pcr_binding;
 #[cfg(all(feature = "minimal", feature = "tpm"))]
-pub use attestation::{AttestationSession, QuoteOutput};
+pub use attestation::{
+    AttestationSession, ManagedAttestationSession, QuoteOutput, TpmContextManager,
+};

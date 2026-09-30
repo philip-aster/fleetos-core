@@ -14,7 +14,7 @@ use std::time::SystemTime;
 use thiserror::Error;
 
 #[cfg(feature = "tpm")]
-pub use tpm::{AttestationSession, QuoteOutput};
+pub use tpm::{AttestationSession, ManagedAttestationSession, QuoteOutput, TpmContextManager};
 
 #[cfg(all(feature = "x509-cert", feature = "der"))]
 use der::{Decode, Encode};

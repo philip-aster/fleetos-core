@@ -91,3 +91,102 @@ fn seal_unseal_32byte_x25519_pcrs_0_7_9() {
         "unsealed data mismatch"
     );
 }
+
+#[test]
+fn context_manager_concurrent_operations() {
+    let _guard = TPM_TEST_LOCK.lock().unwrap();
+    if !tpm_enabled() {
+        eprintln!("skipping TPM context manager test: set FLEETOS_TPM_TESTS=1 to run");
+        return;
+    }
+    let endpoint = tpm_endpoint();
+
+    let mut mgr =
+        fleetos_core::attestation::tpm::TpmContextManager::new(&endpoint).expect("new manager");
+
+    // Begin attestation — creates EK + AK
+    // For swtpm: contexts are saved immediately, freeing all 3 slots
+    let mut session = mgr.begin_attestation().expect("begin attestation");
+
+    // Verify public keys are available
+    assert!(!session.ak_pub().is_empty(), "ak_pub must be present");
+    assert!(!session.ek_pub().is_empty(), "ek_pub must be present");
+
+    // THE KEY TEST: seal while session is active
+    // This was the original failure case — AttestationSession held EK+AK (2 slots),
+    // then seal_to_pcr (separate Context, same TPM) needed SRK (3rd slot) +
+    // TPM2_Create headroom → TPM_RC_MEMORY.
+    //
+    // With TpmContextManager, EK+AK are saved (0 slots used), so seal_to_pcr
+    // has all 3 slots available.
+    let plaintext: [u8; 32] = [0xAB; 32];
+    let sealed = mgr
+        .seal_to_pcr(&plaintext, &[0, 7, 9])
+        .expect("seal while session active");
+
+    // Unseal it
+    let recovered = mgr.unseal(&sealed).expect("unseal");
+    assert_eq!(
+        recovered.as_slice(),
+        plaintext.as_slice(),
+        "unsealed data mismatch"
+    );
+
+    // Quote using the session's AK
+    let nonce = [0x55u8; 32];
+    let quote = mgr.quote(&mut session, &nonce, &[0, 7, 9]).expect("quote");
+    assert!(!quote.quote.is_empty(), "quote must be present");
+    assert!(!quote.signature.is_empty(), "signature must be present");
+    assert_eq!(quote.pcr_values.len(), 3, "3 PCR values requested");
+
+    // Clean up
+    mgr.finish_attestation(session).expect("finish attestation");
+}
+
+#[test]
+fn context_manager_credential_activation() {
+    let _guard = TPM_TEST_LOCK.lock().unwrap();
+    if !tpm_enabled() {
+        eprintln!("skipping TPM credential activation test: set FLEETOS_TPM_TESTS=1 to run");
+        return;
+    }
+    let endpoint = tpm_endpoint();
+
+    let mut mgr =
+        fleetos_core::attestation::tpm::TpmContextManager::new(&endpoint).expect("new manager");
+
+    // Begin attestation
+    let mut session = mgr.begin_attestation().expect("begin attestation");
+
+    // Server side: make_credential (uses its own context, doesn't interfere)
+    let secret: [u8; 32] = [0x5A; 32];
+    let (credential_blob, enc_secret) = fleetos_core::attestation::tpm::make_credential(
+        &endpoint,
+        session.ek_pub(),
+        session.ak_pub(),
+        &secret,
+    )
+    .expect("make_credential");
+
+    // Node side: activate using the managed session
+    // This loads EK+AK from saved contexts, does the activation, saves them back
+    let recovered = mgr
+        .activate(&mut session, &credential_blob, &enc_secret)
+        .expect("activate");
+
+    assert_eq!(
+        recovered,
+        secret.to_vec(),
+        "recovered credential secret does not match"
+    );
+
+    // Can still seal/unseal after activate
+    let plaintext: [u8; 32] = [0xCD; 32];
+    let sealed = mgr
+        .seal_to_pcr(&plaintext, &[0, 7])
+        .expect("seal after activate");
+    let recovered2 = mgr.unseal(&sealed).expect("unseal after activate");
+    assert_eq!(recovered2.as_slice(), plaintext.as_slice());
+
+    mgr.finish_attestation(session).expect("finish");
+}
