@@ -190,3 +190,35 @@ fn context_manager_credential_activation() {
 
     mgr.finish_attestation(session).expect("finish");
 }
+
+#[test]
+fn read_ek_cert_no_esys_errors() {
+    let _guard = TPM_TEST_LOCK.lock().unwrap();
+    if !tpm_enabled() {
+        eprintln!("skipping TPM read_ek_cert test: set FLEETOS_TPM_TESTS=1 to run");
+        return;
+    }
+    let endpoint = tpm_endpoint();
+
+    // TpmContextManager path — swtpm has no provisioned EK cert,
+    // so this must return Ok(None) with ZERO esys ERROR lines.
+    let mut mgr =
+        fleetos_core::attestation::tpm::TpmContextManager::new(&endpoint).expect("new manager");
+    assert!(
+        mgr.read_ek_cert()
+            .expect("TpmContextManager::read_ek_cert must not error")
+            .is_none(),
+        "swtpm has no provisioned EK cert — expected None"
+    );
+
+    // AttestationSession path — same expectation.
+    let mut session = fleetos_core::attestation::tpm::AttestationSession::begin(&endpoint)
+        .expect("AttestationSession::begin failed");
+    assert!(
+        session
+            .read_ek_cert()
+            .expect("AttestationSession::read_ek_cert must not error")
+            .is_none(),
+        "swtpm has no provisioned EK cert — expected None"
+    );
+}

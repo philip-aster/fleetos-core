@@ -324,13 +324,57 @@ impl AttestationSession {
     }
 
     pub fn read_ek_cert(&mut self) -> Result<Option<Vec<u8>>, TssError> {
-        use tss_esapi::handles::NvIndexHandle;
+        use tss_esapi::constants::CapabilityType;
+        use tss_esapi::handles::{NvIndexHandle, NvIndexTpmHandle, TpmHandle};
         use tss_esapi::interface_types::resource_handles::NvAuth;
+        use tss_esapi::structures::CapabilityData;
 
-        // tss-esapi 7.7.0 allows direct construction from the u32 index.
-        let nv_handle = NvIndexHandle::from(0x01C0_0002u32);
+        const EK_CERT_NV_INDEX: u32 = 0x01C0_0002;
 
-        match self.context.nv_read(NvAuth::Owner, nv_handle, 2048, 0) {
+        // Step 1: Check if the NV index exists via GetCapability.
+        // This always succeeds and produces zero esys errors, unlike
+        // nv_read on a non-existent index which emits 4 ERROR lines.
+        let (cap_data, _) = self
+            .context
+            .get_capability(CapabilityType::Handles, EK_CERT_NV_INDEX, 1)
+            .map_err(|e| TssError::Esapi(format!("get_capability: {}", e)))?;
+
+        let exists = match cap_data {
+            CapabilityData::Handles(handles) => handles.as_ref().iter().any(|h| {
+                if let TpmHandle::NvIndex(nv) = h {
+                    u32::from(*nv) == EK_CERT_NV_INDEX
+                } else {
+                    false
+                }
+            }),
+            _ => false,
+        };
+
+        if !exists {
+            return Ok(None);
+        }
+
+        // Step 2: Register the raw TPM handle with ESAPI to get a proper
+        // ESYS_TR. NvIndexHandle::from(u32) does NOT do this — it creates
+        // an ESYS_TR with the raw value, which ESAPI doesn't recognize.
+        // tr_from_tpm_public calls Esys_TR_FromTPMPublic, which reads the
+        // NV public area and registers the handle in ESAPI's resource table.
+        let nv_tpm_handle = NvIndexTpmHandle::new(EK_CERT_NV_INDEX)
+            .map_err(|e| TssError::Esapi(format!("bad NV index handle: {}", e)))?;
+        let esys_handle = self
+            .context
+            .tr_from_tpm_public(TpmHandle::NvIndex(nv_tpm_handle))
+            .map_err(|e| TssError::Esapi(format!("tr_from_tpm_public: {}", e)))?;
+        let nv_handle = NvIndexHandle::from(esys_handle);
+
+        // Step 3: Read the EK certificate with a null-auth session.
+        // The TCG EK Credential Profile defines this index with an
+        // authPolicy permitting null-auth reads under the Owner hierarchy.
+        let result = self
+            .context
+            .execute_with_nullauth_session(|ctx| ctx.nv_read(NvAuth::Owner, nv_handle, 2048, 0));
+
+        match result {
             Ok(data) => Ok(Some(data.value().to_vec())),
             Err(_) => Ok(None),
         }
@@ -1447,11 +1491,57 @@ impl TpmContextManager {
 
     /// Read the EK certificate from NV index (if present).
     pub fn read_ek_cert(&mut self) -> Result<Option<Vec<u8>>, TssError> {
-        use tss_esapi::handles::NvIndexHandle;
+        use tss_esapi::constants::CapabilityType;
+        use tss_esapi::handles::{NvIndexHandle, NvIndexTpmHandle, TpmHandle};
         use tss_esapi::interface_types::resource_handles::NvAuth;
+        use tss_esapi::structures::CapabilityData;
 
-        let nv_handle = NvIndexHandle::from(0x01C0_0002u32);
-        match self.context.nv_read(NvAuth::Owner, nv_handle, 2048, 0) {
+        const EK_CERT_NV_INDEX: u32 = 0x01C0_0002;
+
+        // Step 1: Check if the NV index exists via GetCapability.
+        // This always succeeds and produces zero esys errors, unlike
+        // nv_read on a non-existent index which emits 4 ERROR lines.
+        let (cap_data, _) = self
+            .context
+            .get_capability(CapabilityType::Handles, EK_CERT_NV_INDEX, 1)
+            .map_err(|e| TssError::Esapi(format!("get_capability: {}", e)))?;
+
+        let exists = match cap_data {
+            CapabilityData::Handles(handles) => handles.as_ref().iter().any(|h| {
+                if let TpmHandle::NvIndex(nv) = h {
+                    u32::from(*nv) == EK_CERT_NV_INDEX
+                } else {
+                    false
+                }
+            }),
+            _ => false,
+        };
+
+        if !exists {
+            return Ok(None);
+        }
+
+        // Step 2: Register the raw TPM handle with ESAPI to get a proper
+        // ESYS_TR. NvIndexHandle::from(u32) does NOT do this — it creates
+        // an ESYS_TR with the raw value, which ESAPI doesn't recognize.
+        // tr_from_tpm_public calls Esys_TR_FromTPMPublic, which reads the
+        // NV public area and registers the handle in ESAPI's resource table.
+        let nv_tpm_handle = NvIndexTpmHandle::new(EK_CERT_NV_INDEX)
+            .map_err(|e| TssError::Esapi(format!("bad NV index handle: {}", e)))?;
+        let esys_handle = self
+            .context
+            .tr_from_tpm_public(TpmHandle::NvIndex(nv_tpm_handle))
+            .map_err(|e| TssError::Esapi(format!("tr_from_tpm_public: {}", e)))?;
+        let nv_handle = NvIndexHandle::from(esys_handle);
+
+        // Step 3: Read the EK certificate with a null-auth session.
+        // The TCG EK Credential Profile defines this index with an
+        // authPolicy permitting null-auth reads under the Owner hierarchy.
+        let result = self
+            .context
+            .execute_with_nullauth_session(|ctx| ctx.nv_read(NvAuth::Owner, nv_handle, 2048, 0));
+
+        match result {
             Ok(data) => Ok(Some(data.value().to_vec())),
             Err(_) => Ok(None),
         }
