@@ -96,6 +96,9 @@ message RouteEntry {
   // map keys are big-endian (network order): to_be_bytes() of this value;
   // consumers convert via HostOrderIpv4::from_network() at map-insertion time.
   uint32 dummy_ip = 4;
+  // Services that depend on this route (i.e., services that need to reach
+  // the destination service). Populated by control from SAG rules.
+  repeated string source_spiffe_ids = 5;
 }
 
 message WatchEvent {
