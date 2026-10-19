@@ -64,6 +64,7 @@ pub mod state {
         DelegatedKeyRequest,
         DelegatedKeyResponse,
         MetricsAck,
+        NodeStatusReport,
         PeerSelector,
         PodMetrics,
         RouteEntry,

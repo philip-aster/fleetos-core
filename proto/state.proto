@@ -25,9 +25,16 @@ service WatchService {
 
 // CR-4 (G-10): agents push workload liveness/readiness so control's pod
 // controller has a death signal other than missing placements.
+// CORE-WI-6 (Ruling I): agents also push a node-level heartbeat — liveness
+// is NOT inferred from ReportWorkloadStatus. Zero-pod nodes would otherwise
+// go silent and be evicted by the node lease check.
 service WorkloadStatusService {
-  rpc ReportWorkloadStatus(WorkloadStatusReport) returns (StatusAck);
-  rpc ReportPodMetrics(PodMetrics) returns (MetricsAck); // CR-CORE-9
+    rpc ReportWorkloadStatus(WorkloadStatusReport) returns (StatusAck);
+    rpc ReportPodMetrics(PodMetrics) returns (MetricsAck); // CR-CORE-9
+    // CORE-WI-6: node liveness heartbeat, emitted on a fixed cadence
+    // regardless of pod count. Control refreshes NodeRecord.last_heartbeat
+    // from this using its own receipt clock.
+    rpc ReportNodeStatus(NodeStatusReport) returns (StatusAck);
 }
 
 message WatchRequest {
@@ -158,6 +165,19 @@ message MetricsAck {
 
 message StatusAck {
   bool accepted = 1;
+}
+
+// CORE-WI-6 (Ruling I): node-level liveness heartbeat.
+// SECURITY: control's handler MUST cross-check node_svid against the mTLS
+// peer identity and reject mismatches fail-closed — heartbeats are not
+// spoofable by anyone other than the node itself.
+message NodeStatusReport {
+// Node SPIFFE ID. Must match both the NodeRecord key and the caller's
+// mTLS SVID (see SECURITY note above).
+string node_svid = 1;
+// Agent-observed heartbeat time (unix seconds). Informational/diagnostic
+// only — control's lease math uses its own receipt clock, never this.
+uint64 observed_at_unix = 2;
 }
 
 // CR-16 (3b resolution, Option 1): node-callable delegation acquisition.
